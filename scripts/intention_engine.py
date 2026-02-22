@@ -29,6 +29,14 @@ import urllib.request
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+try:
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+except ImportError:  # pragma: no cover - Python <3.9 fallback
+    ZoneInfo = None  # type: ignore[assignment]
+
+    class ZoneInfoNotFoundError(Exception):
+        pass
+
 
 PROJECT = Path(__file__).resolve().parents[1]
 WORKSPACE = Path(os.environ.get("INTENTION_ENGINE_WORKSPACE", str(PROJECT))).expanduser().resolve()
@@ -126,7 +134,8 @@ class Proposal:
     title: str
     source: str
     url: str
-    created_at: dt.datetime
+    source_created_at: dt.datetime
+    discovered_at: dt.datetime
     score: float
     relevance: float
     value: float
@@ -146,6 +155,22 @@ class Proposal:
 
 def utc_now() -> dt.datetime:
     return dt.datetime.now(dt.timezone.utc)
+
+
+def resolve_runtime_timezone(config: Dict[str, Any]) -> Tuple[dt.tzinfo, str]:
+    tz_name = str(config.get("timezone", "UTC")).strip() or "UTC"
+    if ZoneInfo is None:
+        return dt.timezone.utc, "UTC"
+    try:
+        return ZoneInfo(tz_name), tz_name
+    except ZoneInfoNotFoundError:
+        return dt.timezone.utc, "UTC"
+
+
+def runtime_date_key(config: Dict[str, Any], now: Optional[dt.datetime] = None) -> str:
+    tz, _ = resolve_runtime_timezone(config)
+    base = (now or utc_now()).astimezone(tz)
+    return base.date().isoformat()
 
 
 def read_text(path: Path, default: str = "") -> str:
@@ -367,15 +392,16 @@ def minutes_since(timestamp: Optional[dt.datetime], now: Optional[dt.datetime] =
     return delta.total_seconds() / 60.0
 
 
-def load_budget_state(config: Dict[str, Any]) -> Dict[str, Any]:
+def load_budget_state(config: Dict[str, Any], now: Optional[dt.datetime] = None) -> Dict[str, Any]:
     default_daily = float(config.get("daily_budget_gbp", 2.0))
     default_reserve = float(config.get("reserve_budget_gbp", 0.2))
     default_remaining = max(default_daily - default_reserve, 0.0)
+    today_key = runtime_date_key(config, now=now)
 
     state = read_json(
         BUDGET_STATE_PATH,
         default={
-            "date": utc_now().date().isoformat(),
+            "date": today_key,
             "daily_budget_gbp": default_daily,
             "reserve_budget_gbp": default_reserve,
             "used_gbp": 0.0,
@@ -384,10 +410,9 @@ def load_budget_state(config: Dict[str, Any]) -> Dict[str, Any]:
         },
     )
 
-    today = utc_now().date().isoformat()
-    if state.get("date") != today:
+    if state.get("date") != today_key:
         state = {
-            "date": today,
+            "date": today_key,
             "daily_budget_gbp": default_daily,
             "reserve_budget_gbp": default_reserve,
             "used_gbp": 0.0,
@@ -662,7 +687,8 @@ def existing_proposal_slugs() -> set[str]:
 
 
 def proposal_markdown(proposal: Proposal) -> str:
-    created_iso = proposal.created_at.isoformat()
+    discovered_iso = proposal.discovered_at.isoformat()
+    source_created_iso = proposal.source_created_at.isoformat()
     return textwrap.dedent(
         f"""\
         ---
@@ -670,7 +696,9 @@ def proposal_markdown(proposal: Proposal) -> str:
         title: {proposal.title}
         source: {proposal.source}
         url: {proposal.url}
-        created_at: {created_iso}
+        created_at: {discovered_iso}
+        discovered_at: {discovered_iso}
+        source_created_at: {source_created_iso}
         saga_id: {proposal.saga_id}
         chapter_id: {proposal.chapter_id}
         alignment:
@@ -710,7 +738,12 @@ def proposal_markdown(proposal: Proposal) -> str:
     )
 
 
-def build_proposal(scored: ScoredCandidate, config: Dict[str, Any], proposal_id: str) -> Proposal:
+def build_proposal(
+    scored: ScoredCandidate,
+    config: Dict[str, Any],
+    proposal_id: str,
+    discovered_at: dt.datetime,
+) -> Proposal:
     saga_id = config.get("intake", {}).get("default_saga_id", "S02")
     chapter_id = config.get("intake", {}).get("default_chapter_id", "C06")
 
@@ -734,7 +767,8 @@ def build_proposal(scored: ScoredCandidate, config: Dict[str, Any], proposal_id:
         title=title,
         source=scored.candidate.source,
         url=scored.candidate.url,
-        created_at=scored.candidate.created_at,
+        source_created_at=scored.candidate.created_at,
+        discovered_at=discovered_at,
         score=scored.score,
         relevance=scored.relevance,
         value=scored.value,
@@ -884,8 +918,8 @@ def append_reflect_entry(mode: str, run_summary: Dict[str, Any]) -> None:
     atomic_write(REFLECT_PATH, current.rstrip() + entry + "\n")
 
 
-def update_metrics(run_summary: Dict[str, Any]) -> Path:
-    date_key = utc_now().date().isoformat()
+def update_metrics(run_summary: Dict[str, Any], date_key: Optional[str] = None) -> Path:
+    date_key = date_key or utc_now().date().isoformat()
     metrics_path = METRICS_DIR / f"intention-engine-{date_key}.json"
     payload = read_json(metrics_path, default={"date": date_key, "runs": []})
     payload.setdefault("runs", []).append(run_summary)
@@ -904,13 +938,30 @@ def run_engine(mode: str, force: bool, dry_run: bool) -> Dict[str, Any]:
     with file_lock(LOCK_PATH):
         ensure_runtime_structure(sync_philosophy=False)
 
+        runtime_tz, runtime_tz_name = resolve_runtime_timezone(config)
         now = utc_now()
+        runtime_now = now.astimezone(runtime_tz)
+        runtime_date = runtime_now.date().isoformat()
         last_human = parse_last_human_activity()
         idle_minutes = minutes_since(last_human, now)
 
         idle_threshold = float(config.get("idle_threshold_minutes", 5))
+        missing_signal_policy = str(config.get("micro_missing_activity_signal", "skip")).strip().lower()
         if mode == "micro" and not force:
-            if idle_minutes is not None and idle_minutes <= idle_threshold:
+            if idle_minutes is None:
+                if missing_signal_policy != "run":
+                    return {
+                        "status": "skipped_missing_activity_signal",
+                        "mode": mode,
+                        "idle_minutes": None,
+                        "idle_threshold_minutes": idle_threshold,
+                        "missing_signal_policy": missing_signal_policy,
+                        "message": (
+                            "micro run skipped because data/last-human-activity.json is missing; "
+                            "set micro_missing_activity_signal=run to override"
+                        ),
+                    }
+            elif idle_minutes <= idle_threshold:
                 return {
                     "status": "skipped_active_human",
                     "mode": mode,
@@ -919,7 +970,7 @@ def run_engine(mode: str, force: bool, dry_run: bool) -> Dict[str, Any]:
                     "message": "micro run skipped to avoid main-thread interference",
                 }
 
-        budget_state = load_budget_state(config)
+        budget_state = load_budget_state(config, now=now)
         mode_cost = float(config.get("mode_costs_gbp", {}).get(mode, 0.05))
         run_cost = mode_cost
         if dry_run:
@@ -952,7 +1003,7 @@ def run_engine(mode: str, force: bool, dry_run: bool) -> Dict[str, Any]:
         max_items = int(config.get("intake", {}).get(f"{mode}_max_items", 2 if mode == "micro" else 5))
         picked = scored[:max_items]
 
-        proposal_index = next_proposal_index(now.date().isoformat())
+        proposal_index = next_proposal_index(runtime_date)
         existing_slugs = existing_proposal_slugs()
         run_seen_slugs: set[str] = set()
 
@@ -963,9 +1014,9 @@ def run_engine(mode: str, force: bool, dry_run: bool) -> Dict[str, Any]:
             if candidate_slug in existing_slugs or candidate_slug in run_seen_slugs:
                 continue
 
-            proposal_id = f"P-{now.date().isoformat()}-{idx:03d}"
+            proposal_id = f"P-{runtime_date}-{idx:03d}"
             idx += 1
-            proposal = build_proposal(item, config, proposal_id)
+            proposal = build_proposal(item, config, proposal_id, discovered_at=now)
             proposals.append(proposal)
             run_seen_slugs.add(candidate_slug)
 
@@ -1003,6 +1054,9 @@ def run_engine(mode: str, force: bool, dry_run: bool) -> Dict[str, Any]:
 
         run_summary = {
             "timestamp": now.isoformat(),
+            "runtime_local_timestamp": runtime_now.isoformat(),
+            "runtime_timezone": runtime_tz_name,
+            "runtime_date": runtime_date,
             "mode": mode,
             "status": "ok",
             "dry_run": dry_run,
@@ -1022,6 +1076,7 @@ def run_engine(mode: str, force: bool, dry_run: bool) -> Dict[str, Any]:
         budget_state.setdefault("runs", []).append(
             {
                 "timestamp": now.isoformat(),
+                "runtime_local_timestamp": runtime_now.isoformat(),
                 "mode": mode,
                 "cost_gbp": round(run_cost, 4),
                 "proposals_created": created,
@@ -1034,14 +1089,18 @@ def run_engine(mode: str, force: bool, dry_run: bool) -> Dict[str, Any]:
 
         if not dry_run:
             atomic_write_json(BUDGET_STATE_PATH, budget_state)
-            update_metrics(run_summary)
+            update_metrics(run_summary, date_key=runtime_date)
             append_reflect_entry(mode, run_summary)
 
         return run_summary
 
 
-def list_recent_proposals(directory: Path, max_age_hours: int = 24) -> List[Tuple[Path, Dict[str, str]]]:
-    now = utc_now()
+def list_recent_proposals(
+    directory: Path,
+    now: Optional[dt.datetime] = None,
+    max_age_hours: int = 24,
+) -> List[Tuple[Path, Dict[str, str]]]:
+    now = now or utc_now()
     out: List[Tuple[Path, Dict[str, str]]] = []
     for path in sorted(directory.glob("*.md"), reverse=True):
         text = read_text(path)
@@ -1058,7 +1117,9 @@ def list_recent_proposals(directory: Path, max_age_hours: int = 24) -> List[Tupl
             key, value = line.split(":", 1)
             fields[key.strip()] = value.strip()
 
-        created = parse_iso_or_epoch(fields.get("created_at"))
+        created = parse_iso_or_epoch(fields.get("discovered_at"))
+        if created is None:
+            created = parse_iso_or_epoch(fields.get("created_at"))
         if created is None:
             created = parse_iso_or_epoch(fields.get("id", ""))
         if created is not None:
@@ -1070,13 +1131,18 @@ def list_recent_proposals(directory: Path, max_age_hours: int = 24) -> List[Tupl
 
 
 def generate_brief() -> Dict[str, Any]:
+    config = load_config(CONFIG_PATH)
     ensure_runtime_structure(sync_philosophy=False)
 
-    approved = list_recent_proposals(APPROVED_DIR, max_age_hours=24)
-    inbox = list_recent_proposals(INBOX_DIR, max_age_hours=24)
-    deferred = list_recent_proposals(DEFERRED_DIR, max_age_hours=24)
+    runtime_tz, runtime_tz_name = resolve_runtime_timezone(config)
+    now = utc_now()
+    runtime_now = now.astimezone(runtime_tz)
 
-    date_key = utc_now().date().isoformat()
+    approved = list_recent_proposals(APPROVED_DIR, now=now, max_age_hours=24)
+    inbox = list_recent_proposals(INBOX_DIR, now=now, max_age_hours=24)
+    deferred = list_recent_proposals(DEFERRED_DIR, now=now, max_age_hours=24)
+
+    date_key = runtime_now.date().isoformat()
     brief_path = BRIEFINGS_DIR / f"{date_key}-intention-brief.md"
 
     lines = [
@@ -1109,6 +1175,7 @@ def generate_brief() -> Dict[str, Any]:
             "## Notes",
             "- Generated by Intention Engine `brief` command.",
             "- Non-blocking policy retained: background tasks never take conversation priority.",
+            f"- Timezone: {runtime_tz_name}",
             "",
         ]
     )

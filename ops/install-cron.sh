@@ -3,9 +3,25 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+CONFIG_PATH="$REPO_ROOT/config/runtime.json"
 
 BLOCK_START="# >>> intention-engine-autoschedule >>>"
 BLOCK_END="# <<< intention-engine-autoschedule <<<"
+
+TZ_NAME="$(python3 - "$CONFIG_PATH" <<'PY'
+import json
+import pathlib
+import sys
+
+cfg_path = pathlib.Path(sys.argv[1])
+try:
+    cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+    tz = str(cfg.get("timezone", "UTC")).strip() or "UTC"
+except Exception:
+    tz = "UTC"
+print(tz)
+PY
+)"
 
 TMP=$(mktemp)
 (crontab -l 2>/dev/null || true) > "$TMP"
@@ -19,9 +35,11 @@ skip==0 {print}
 
 cat >> "${TMP}.clean" <<CRON
 $BLOCK_START
-*/30 * * * * $REPO_ROOT/ops/micro.sh >> /tmp/intention-engine-micro.log 2>&1
-30 23 * * * $REPO_ROOT/ops/deep.sh >> /tmp/intention-engine-deep.log 2>&1
-55 6 * * * $REPO_ROOT/ops/brief.sh >> /tmp/intention-engine-brief.log 2>&1
+PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+CRON_TZ=$TZ_NAME
+*/30 * * * * "$REPO_ROOT/ops/micro.sh" >> /tmp/intention-engine-micro.log 2>&1
+30 23 * * * "$REPO_ROOT/ops/deep.sh" >> /tmp/intention-engine-deep.log 2>&1
+55 6 * * * "$REPO_ROOT/ops/brief.sh" >> /tmp/intention-engine-brief.log 2>&1
 $BLOCK_END
 CRON
 

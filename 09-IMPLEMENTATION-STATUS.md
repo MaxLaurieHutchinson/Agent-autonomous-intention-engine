@@ -42,9 +42,15 @@
 
 ## Safety and Non-Blocking Behavior
 - Micro loop is idle-gated from `data/last-human-activity.json`.
+- Missing activity signal defaults to fail-closed skip (`micro_missing_activity_signal: skip`).
 - Lock file prevents concurrent write collisions: `memory/metrics/intention-engine.lock`.
 - No external/public actions are executed by the runtime.
 - Human-gated proposals remain in inbox.
+
+## Time and Recency Behavior
+- Runtime date boundaries (budget reset, proposal IDs, metrics, briefing file date) use configured timezone from `config/runtime.json`.
+- Cron installer writes `CRON_TZ` to align schedule execution with configured timezone.
+- Proposal frontmatter now includes `discovered_at` and `source_created_at` so briefing recency uses discovery time.
 
 ## Validation Performed
 - `python3 scripts/intention_engine.py init`

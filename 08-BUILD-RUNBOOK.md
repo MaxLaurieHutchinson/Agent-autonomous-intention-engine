@@ -58,11 +58,12 @@ Use your scheduler of choice with these cadences:
 55 6 * * * /path/to/Agent-autonomous-intention-engine/ops/brief.sh >> /tmp/intention-engine-brief.log 2>&1
 ```
 
-`intention-engine-install-cron.sh` manages this block automatically.
+`./ops/install-cron.sh` manages this block automatically and sets `CRON_TZ` from `config/runtime.json`.
 
 ## Non-Blocking Guarantee
 
 - Micro loop is idle-gated by `data/last-human-activity.json`.
+- If activity signal is missing, micro loop skips by default (`micro_missing_activity_signal: skip`).
 - Without `--force`, micro runs skip when human activity is recent.
 - All writes are lock-protected (`memory/metrics/intention-engine.lock`).
 - Runs are short and checkpointed by design.
