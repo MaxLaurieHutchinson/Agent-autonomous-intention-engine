@@ -20,7 +20,13 @@ This philosophy file is the decision filter for discovery, routing, and executio
 Legacy names (`DayDream`, `Ash Time`) remain historical references, not product names.
 
 ## v2.1 Runtime Contract
-CLI:
+Preferred package entrypoint:
+- `PYTHONPATH=./src python3 -m intention_engine_core.cli run --mode <micro|deep|research_deep> [--dry-run]`
+- `PYTHONPATH=./src python3 -m intention_engine_core.cli status --json`
+- `PYTHONPATH=./src python3 -m intention_engine_core.cli validate --json`
+- `PYTHONPATH=./src python3 -m intention_engine_core.cli replay --run-id <id>`
+
+Compatibility script entrypoint:
 - `python3 scripts/intention_engine.py run --mode <micro|deep|research_deep> [--dry-run]`
 - `python3 scripts/intention_engine.py status --json`
 - `python3 scripts/intention_engine.py validate --json`
