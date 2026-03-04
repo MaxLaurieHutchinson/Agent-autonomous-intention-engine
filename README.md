@@ -35,16 +35,16 @@ Wrappers:
 - `bash ops/ie_status.sh`
 
 ## What This Pack Contains
-- `01-PROJECT-AUDIT.md` - retained value + consolidation decisions
-- `02-UNIFIED-ARCHITECTURE.md` - end-to-end v2.1 architecture
-- `03-AUTONOMY-OPERATING-MODEL.md` - safety model + policy defaults
-- `04-MIGRATION-PLAN.md` - main -> dev migration plan
-- `05-IMPLEMENTATION-BACKLOG.md` - backlog by saga/chapter
-- `06-ASH-TIME-V3-NORMALIZATION.md` - what was retained/simplified
-- `07-CLAW-TIME-V04-IDEA-TRIAGE.md` - idea triage decisions
-- `08-BUILD-RUNBOOK.md` - build/run/reconcile operations
-- `09-IMPLEMENTATION-STATUS.md` - shipped scope and gaps
-- `10-ASH-OPERATOR-PROMPT.md` - operator prompt for autonomous runs
+- `docs/01-PROJECT-AUDIT.md` - retained value + consolidation decisions
+- `docs/02-UNIFIED-ARCHITECTURE.md` - end-to-end v2.1 architecture
+- `docs/03-AUTONOMY-OPERATING-MODEL.md` - safety model + policy defaults
+- `docs/04-MIGRATION-PLAN.md` - main -> dev migration plan
+- `docs/05-IMPLEMENTATION-BACKLOG.md` - backlog by saga/chapter
+- `docs/06-ASH-TIME-V3-NORMALIZATION.md` - what was retained/simplified
+- `docs/07-CLAW-TIME-V04-IDEA-TRIAGE.md` - idea triage decisions
+- `docs/08-BUILD-RUNBOOK.md` - build/run/reconcile operations
+- `docs/09-IMPLEMENTATION-STATUS.md` - shipped scope and gaps
+- `docs/10-ASH-OPERATOR-PROMPT.md` - operator prompt for autonomous runs
 
 ## Quick Start
 1. Validate config:
