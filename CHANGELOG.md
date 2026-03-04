@@ -1,5 +1,25 @@
 # Changelog
 
+## v2.1.2 - 2026-03-04 (dev)
+- Replaced the prior numbered docs pack as the primary contract with a new topic-based handbook under `docs/`.
+- Rewrote root `README.md` as a product and operations entrypoint.
+- Added deep architecture/runtime/config/operations/reference/roadmap docs:
+  - `docs/INDEX.md`
+  - `docs/architecture/*`
+  - `docs/runtime/*`
+  - `docs/config/*`
+  - `docs/operations/*`
+  - `docs/reference/*`
+  - `docs/roadmap/*`
+- Archived previous numbered docs into `docs/archive/v2.1-notes/` with an archive index.
+- Clarified framework status boundaries:
+  - OODA implemented
+  - BDI planned
+  - Rubber Duck planned
+- Clarified OpenClaw scheduling boundaries:
+  - heartbeat behavior at workspace level
+  - fixed-time deep/brief orchestration in cron isolated jobs
+
 ## v2.1.1 - 2026-03-04 (dev)
 - Removed backward-compatibility command surfaces from `dev`:
   - deleted `scripts/intention_engine.py` and `scripts/path_resolver.py`
