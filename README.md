@@ -26,15 +26,6 @@ Preferred package entrypoint:
 - `PYTHONPATH=./src python3 -m intention_engine_core.cli validate --json`
 - `PYTHONPATH=./src python3 -m intention_engine_core.cli replay --run-id <id>`
 
-Compatibility script entrypoint:
-- `python3 scripts/intention_engine.py run --mode <micro|deep|research_deep> [--dry-run]`
-- `python3 scripts/intention_engine.py status --json`
-- `python3 scripts/intention_engine.py validate --json`
-- `python3 scripts/intention_engine.py replay --run-id <id>`
-
-Legacy compatibility:
-- `python3 scripts/intention_engine.py --mode micro`
-
 Wrappers:
 - `bash ops/ie_micro.sh`
 - `bash ops/ie_deep.sh`
@@ -54,7 +45,7 @@ Wrappers:
 
 ## Quick Start
 1. Validate config:
-   - `python3 scripts/intention_engine.py validate --json`
+   - `PYTHONPATH=./src python3 -m intention_engine_core.cli validate --json`
 2. Dry-run micro loop:
    - `bash ops/ie_micro.sh --dry-run`
 3. Status check:

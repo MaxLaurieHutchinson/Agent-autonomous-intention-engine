@@ -10,8 +10,9 @@ Prepare a clean DEV branch with v2.1 runtime + full notes pack, without disturbi
 
 ## Phase 2 - Runtime Port
 1. Port runtime core:
-- `scripts/intention_engine.py`
-- `scripts/path_resolver.py`
+- `src/intention_engine_core/runtime.py`
+- `src/intention_engine_core/path_resolver.py`
+- `src/intention_engine_core/cli.py`
 2. Port config + schema:
 - `config/runtime.json`
 - `config/runtime.schema.json`
@@ -27,7 +28,7 @@ Prepare a clean DEV branch with v2.1 runtime + full notes pack, without disturbi
 
 ## Phase 4 - Notes and Runbook
 1. Update `README`, `CHANGELOG`, and `01..10` docs to v2.1 reality.
-2. Keep root-level numbered structure for consistency.
+2. Keep numbered docs pack under `docs/` for consistency.
 
 ## Phase 5 - Verification
 1. Run compile checks and unit/integration tests.

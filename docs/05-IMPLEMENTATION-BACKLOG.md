@@ -5,7 +5,7 @@ Narrative goal: make runtime deterministic, portable, and safe-by-default.
 
 ### Chapter C01 - CLI and Config
 - [x] I001 Subcommand CLI (`run`, `status`, `validate`, `replay`)
-- [x] I002 Legacy `--mode` compatibility shim
+- [x] I002 Enforce strict subcommand parsing (no legacy shim)
 - [x] I003 Add `mode_profiles` with disabled `research_deep`
 - [x] I004 Add runtime config schema
 

@@ -2,10 +2,10 @@ import unittest
 from pathlib import Path
 import sys
 
-SCRIPT_DIR = Path(__file__).resolve().parents[1] / "scripts"
-sys.path.insert(0, str(SCRIPT_DIR))
+SRC_DIR = Path(__file__).resolve().parents[1] / "src"
+sys.path.insert(0, str(SRC_DIR))
 
-import intention_engine as ie
+import intention_engine_core.runtime as ie
 
 
 class RoutingGuardrailTests(unittest.TestCase):

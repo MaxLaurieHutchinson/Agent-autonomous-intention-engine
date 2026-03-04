@@ -13,7 +13,7 @@ From the Ash Time v3 lineage, v2.1 retains:
 - replaced mixed policy semantics with explicit routing classes
 
 ## v2.1 Concrete Mapping
-- OODA runtime -> `scripts/intention_engine.py run --mode micro|deep`
+- OODA runtime -> `python3 -m intention_engine_core.cli run --mode micro|deep`
 - Budget model -> `config/runtime.json` (`daily_budget_gbp`, `reserve_budget_gbp`, per-mode cost caps)
 - Reflection -> `memory/REFLECT.md` + replay bundle artifacts
 - Guardrails -> `routing` config + `classify_risk` + deterministic routing

@@ -6,7 +6,7 @@
 
 ## Core Validation
 ```bash
-python3 scripts/intention_engine.py validate --json
+PYTHONPATH=./src python3 -m intention_engine_core.cli validate --json
 python3 -m unittest discover -s tests -v
 ```
 
@@ -28,12 +28,7 @@ bash ops/ie_status.sh
 
 Replay:
 ```bash
-python3 scripts/intention_engine.py replay --run-id <run-id>
-```
-
-## Legacy Compatibility Command
-```bash
-python3 scripts/intention_engine.py --mode micro --dry-run
+PYTHONPATH=./src python3 -m intention_engine_core.cli replay --run-id <run-id>
 ```
 
 ## Cron / Heartbeat Alignment
@@ -46,7 +41,7 @@ bash agents/cron/reconcile-intention-engine-jobs.sh
 ```
 
 ## Operational Smoke Checklist
-1. `python3 scripts/intention_engine.py validate --json` returns status `ok`.
+1. `PYTHONPATH=./src python3 -m intention_engine_core.cli validate --json` returns status `ok`.
 2. `bash ops/ie_micro.sh --dry-run` returns `dry_run` and emits replay bundle.
 3. `bash ops/ie_status.sh` returns parseable JSON.
 4. `python3 -m unittest discover -s tests -v` passes.
