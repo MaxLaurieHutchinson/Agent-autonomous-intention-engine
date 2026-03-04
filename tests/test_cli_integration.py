@@ -7,7 +7,6 @@ import unittest
 from pathlib import Path
 
 MODULE_ROOT = Path(__file__).resolve().parents[1]
-SCRIPT_PATH = MODULE_ROOT / "scripts" / "intention_engine.py"
 
 
 class CliIntegrationTests(unittest.TestCase):
@@ -128,8 +127,11 @@ class CliIntegrationTests(unittest.TestCase):
         self.temp_dir_obj.cleanup()
 
     def run_cli(self, args):
-        cmd = [sys.executable, str(SCRIPT_PATH), "--config", str(self.config_path)] + list(args)
-        return subprocess.run(cmd, capture_output=True, text=True, check=False)
+        env = dict(**os.environ)
+        src_path = str(MODULE_ROOT / "src")
+        env["PYTHONPATH"] = f"{src_path}:{env['PYTHONPATH']}" if env.get("PYTHONPATH") else src_path
+        cmd = [sys.executable, "-m", "intention_engine_core.cli", "--config", str(self.config_path)] + list(args)
+        return subprocess.run(cmd, capture_output=True, text=True, check=False, env=env)
 
     def parse_stdout_json(self, completed: subprocess.CompletedProcess):
         self.assertNotEqual(completed.stdout.strip(), "", msg=completed.stderr)
@@ -180,21 +182,10 @@ class CliIntegrationTests(unittest.TestCase):
         payload = self.parse_stdout_json(completed)
         self.assertEqual(payload["status"], "mode_disabled")
 
-    def test_legacy_mode_invocation_still_works(self) -> None:
-        cmd = [
-            sys.executable,
-            str(SCRIPT_PATH),
-            "--config",
-            str(self.config_path),
-            "--mode",
-            "micro",
-            "--dry-run",
-        ]
-        completed = subprocess.run(cmd, capture_output=True, text=True, check=False)
-        self.assertEqual(completed.returncode, 0, msg=completed.stderr)
-
-        payload = json.loads(completed.stdout)
-        self.assertEqual(payload["status"], "dry_run")
+    def test_missing_subcommand_fails(self) -> None:
+        completed = self.run_cli([])
+        self.assertNotEqual(completed.returncode, 0)
+        self.assertIn("the following arguments are required: command", completed.stderr)
 
     def test_workspace_wrappers_execute(self) -> None:
         env = dict(**os.environ, INTENTION_ENGINE_CONFIG=str(self.config_path))

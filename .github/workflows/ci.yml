@@ -26,14 +26,12 @@ jobs:
           python -m py_compile src/intention_engine_core/cli.py
           python -m py_compile src/intention_engine_core/path_resolver.py
           python -m py_compile src/intention_engine_core/runtime.py
-          python -m py_compile scripts/path_resolver.py
-          python -m py_compile scripts/intention_engine.py
 
       - name: Run unit/integration tests
         run: python -m unittest discover -s tests -v
 
       - name: Validate config
-        run: python scripts/intention_engine.py validate --json
+        run: PYTHONPATH=src python -m intention_engine_core.cli validate --json
 
       - name: Dry-run micro loop
         run: bash ops/ie_micro.sh --dry-run

@@ -3,10 +3,10 @@ from pathlib import Path
 
 import sys
 
-SCRIPT_DIR = Path(__file__).resolve().parents[1] / "scripts"
-sys.path.insert(0, str(SCRIPT_DIR))
+SRC_DIR = Path(__file__).resolve().parents[1] / "src"
+sys.path.insert(0, str(SRC_DIR))
 
-from path_resolver import resolve_path_value
+from intention_engine_core.path_resolver import resolve_path_value
 
 
 class PathResolutionTests(unittest.TestCase):
