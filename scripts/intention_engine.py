@@ -1,14 +1,5 @@
 #!/usr/bin/env python3
-"""Intention Engine runtime.
-
-Implements a deterministic, file-first autonomous loop:
-- init runtime state
-- run discovery + proposal routing
-- generate daily brief
-- show status
-
-Designed for non-blocking background execution and safe state writes.
-"""
+"""Intention Engine runtime with subcommand CLI and deterministic replay bundles."""
 
 from __future__ import annotations
 
@@ -17,54 +8,33 @@ import contextlib
 import dataclasses
 import datetime as dt
 import fcntl
+import hashlib
 import json
 import math
 import os
 import re
 import shutil
+import sys
 import tempfile
 import textwrap
 import urllib.parse
 import urllib.request
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Optional, Tuple
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
+try:
+    from path_resolver import resolve_config_path, resolve_path_value
+except ImportError:  # pragma: no cover - package import fallback
+    from .path_resolver import resolve_config_path, resolve_path_value
 
-PROJECT = Path(__file__).resolve().parents[1]
-WORKSPACE = Path(os.environ.get("INTENTION_ENGINE_WORKSPACE", str(PROJECT))).expanduser().resolve()
-CONFIG_PATH = Path(os.environ.get("INTENTION_ENGINE_CONFIG", str(PROJECT / "config" / "runtime.json"))).expanduser().resolve()
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+# Standalone repository mode: workspace root is the repository root.
+WORKSPACE_ROOT = PROJECT_ROOT
+DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config" / "runtime.json"
+DEFAULT_SCHEMA_PATH = PROJECT_ROOT / "config" / "runtime.schema.json"
+FALLBACK_PHILOSOPHY_SOURCE = PROJECT_ROOT / "philosophy" / "PHILOSOPHY.md"
 
-_default_philosophy_in_workspace = WORKSPACE / "philosophy" / "PHILOSOPHY.md"
-_default_philosophy_in_project = PROJECT / "philosophy" / "PHILOSOPHY.md"
-PHILOSOPHY_SOURCE = Path(
-    os.environ.get(
-        "INTENTION_ENGINE_PHILOSOPHY_SOURCE",
-        str(_default_philosophy_in_workspace if _default_philosophy_in_workspace.exists() else _default_philosophy_in_project),
-    )
-).expanduser().resolve()
-
-MEMORY_DIR = WORKSPACE / "memory"
-INTENT_PATH = MEMORY_DIR / "INTENT.md"
-REFLECT_PATH = MEMORY_DIR / "REFLECT.md"
-PHILOSOPHY_RUNTIME_PATH = MEMORY_DIR / "PHILOSOPHY.md"
-
-PROPOSALS_DIR = MEMORY_DIR / "proposals"
-INBOX_DIR = PROPOSALS_DIR / "inbox"
-APPROVED_DIR = PROPOSALS_DIR / "approved"
-REJECTED_DIR = PROPOSALS_DIR / "rejected"
-DEFERRED_DIR = PROPOSALS_DIR / "deferred"
-
-BRIEFINGS_DIR = MEMORY_DIR / "briefings"
-METRICS_DIR = MEMORY_DIR / "metrics"
-POLICIES_DIR = MEMORY_DIR / "policies"
-TEMPLATES_DIR = MEMORY_DIR / "templates"
-
-DATA_DIR = WORKSPACE / "data"
-LAST_HUMAN_ACTIVITY_PATH = DATA_DIR / "last-human-activity.json"
-BUDGET_STATE_PATH = DATA_DIR / "intention-engine-budget.json"
-LOCK_PATH = METRICS_DIR / "intention-engine.lock"
-
-USER_AGENT = "IntentionEngine/0.2 (+https://local.workspace)"
+USER_AGENT = "IntentionEngine/2.1"
 DEFAULT_TIMEOUT = 10
 
 AI_HINT_TERMS = {
@@ -77,25 +47,18 @@ AI_HINT_TERMS = {
     "automation",
     "workflow",
     "reasoning",
-    "openai",
-    "anthropic",
-    "gemini",
-    "local",
-    "inference",
 }
-
 LOW_SIGNAL_TITLE_TERMS = {
     "sports",
     "football",
     "hockey",
     "soccer",
     "basketball",
-    "hydrogen",
-    "car",
-    "vehicle",
-    "toyota",
     "politics",
 }
+
+LEGACY_GLOBAL_FLAGS = {"--config", "-h", "--help"}
+COMMANDS = {"run", "status", "validate", "replay"}
 
 
 @dataclasses.dataclass
@@ -129,23 +92,49 @@ class Proposal:
     created_at: dt.datetime
     score: float
     relevance: float
-    value: float
-    urgency: float
-    effort: float
-    risk: float
     autonomy_class: str
-    external_sensitive: bool
-    saga_id: str
-    chapter_id: str
-    recommended_action: str
-    narrative_reason: str
-    evidence_target: str
-    acceptance_test: str
     filepath: Path
+
+
+@dataclasses.dataclass
+class RuntimePaths:
+    intent_path: Path
+    reflect_path: Path
+    philosophy_path: Path
+    philosophy_fallback_path: Path
+    proposals_dir: Path
+    inbox_dir: Path
+    approved_dir: Path
+    rejected_dir: Path
+    deferred_dir: Path
+    briefings_dir: Path
+    metrics_dir: Path
+    budget_state_path: Path
+    lock_path: Path
+    logs_path: Path
+    replay_dir: Path
+    cron_jobs_path: Path
 
 
 def utc_now() -> dt.datetime:
     return dt.datetime.now(dt.timezone.utc)
+
+
+def to_iso8601(value: dt.datetime) -> str:
+    return value.astimezone(dt.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def parse_datetime(value: str) -> dt.datetime:
+    if not value:
+        return utc_now()
+    normalized = value.strip().replace("Z", "+00:00")
+    try:
+        parsed = dt.datetime.fromisoformat(normalized)
+    except ValueError:
+        return utc_now()
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=dt.timezone.utc)
+    return parsed.astimezone(dt.timezone.utc)
 
 
 def read_text(path: Path, default: str = "") -> str:
@@ -178,12 +167,18 @@ def atomic_write_json(path: Path, payload: Any) -> None:
 @contextlib.contextmanager
 def file_lock(path: Path):
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "a+", encoding="utf-8") as f:
-        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+    with path.open("a+", encoding="utf-8") as handle:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
         try:
             yield
         finally:
-            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+
+def write_jsonl(path: Path, payload: Dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(payload, sort_keys=True) + "\n")
 
 
 def clamp(value: float, lower: float, upper: float) -> float:
@@ -193,344 +188,6 @@ def clamp(value: float, lower: float, upper: float) -> float:
 def slugify(text: str, limit: int = 48) -> str:
     slug = re.sub(r"[^a-zA-Z0-9]+", "-", text.lower()).strip("-")
     return slug[:limit] or "proposal"
-
-
-def parse_iso_or_epoch(value: Any) -> Optional[dt.datetime]:
-    if value is None:
-        return None
-    if isinstance(value, (int, float)):
-        # Heuristic: milliseconds if too large.
-        if value > 10_000_000_000:
-            return dt.datetime.fromtimestamp(value / 1000.0, tz=dt.timezone.utc)
-        return dt.datetime.fromtimestamp(value, tz=dt.timezone.utc)
-    if isinstance(value, str):
-        try:
-            if value.endswith("Z"):
-                value = value.replace("Z", "+00:00")
-            parsed = dt.datetime.fromisoformat(value)
-            if parsed.tzinfo is None:
-                parsed = parsed.replace(tzinfo=dt.timezone.utc)
-            return parsed.astimezone(dt.timezone.utc)
-        except ValueError:
-            return None
-    return None
-
-
-def load_config(path: Path) -> Dict[str, Any]:
-    cfg = read_json(path, default={})
-    if not cfg:
-        raise RuntimeError(f"Missing config: {path}")
-    return cfg
-
-
-def ensure_runtime_structure(sync_philosophy: bool = False) -> Dict[str, Any]:
-    created: List[str] = []
-
-    for directory in [
-        INBOX_DIR,
-        APPROVED_DIR,
-        REJECTED_DIR,
-        DEFERRED_DIR,
-        BRIEFINGS_DIR,
-        METRICS_DIR,
-        POLICIES_DIR,
-        TEMPLATES_DIR,
-        DATA_DIR,
-    ]:
-        if not directory.exists():
-            directory.mkdir(parents=True, exist_ok=True)
-            created.append(str(directory))
-
-    if (not PHILOSOPHY_RUNTIME_PATH.exists()) or sync_philosophy:
-        if not PHILOSOPHY_SOURCE.exists():
-            raise RuntimeError(f"Missing philosophy source: {PHILOSOPHY_SOURCE}")
-        shutil.copy2(PHILOSOPHY_SOURCE, PHILOSOPHY_RUNTIME_PATH)
-        created.append(str(PHILOSOPHY_RUNTIME_PATH))
-
-    if not REFLECT_PATH.exists():
-        atomic_write(
-            REFLECT_PATH,
-            "# REFLECT.md - Intention Engine Session Reflections\n\n"
-            "Append one section per autonomous run with results and learnings.\n",
-        )
-        created.append(str(REFLECT_PATH))
-
-    if not BUDGET_STATE_PATH.exists():
-        payload = {
-            "date": utc_now().date().isoformat(),
-            "daily_budget_gbp": 2.0,
-            "reserve_budget_gbp": 0.2,
-            "used_gbp": 0.0,
-            "remaining_gbp": 1.8,
-            "runs": [],
-        }
-        atomic_write_json(BUDGET_STATE_PATH, payload)
-        created.append(str(BUDGET_STATE_PATH))
-
-    fallback_policy = POLICIES_DIR / "fallbacks.md"
-    if not fallback_policy.exists():
-        atomic_write(
-            fallback_policy,
-            textwrap.dedent(
-                """\
-                # Fallback Policy
-
-                ## Rules
-                - If a workflow upgrade fails validation, revert to last known stable version.
-                - Never apply fallback by deleting historical evidence.
-                - Record fallback event in `memory/REFLECT.md` and metrics.
-
-                ## Trigger Conditions
-                - Runtime error in upgraded workflow
-                - Validation hook fails
-                - Budget overrun during upgraded execution
-                """
-            ),
-        )
-        created.append(str(fallback_policy))
-
-    skill_evo_template = TEMPLATES_DIR / "proposal-skill-evolution.md"
-    if not skill_evo_template.exists():
-        atomic_write(
-            skill_evo_template,
-            textwrap.dedent(
-                """\
-                # Skill Evolution Proposal
-
-                ## Context
-                - Problem:
-                - Why existing skills are insufficient:
-
-                ## Proposed Skill Change
-                - Skill:
-                - Version:
-                - Validation hook:
-                - Fallback pointer:
-
-                ## Risk and Cost
-                - Risk class:
-                - Estimated budget/time:
-
-                ## Human Decision
-                - [ ] Approve
-                - [ ] Reject
-                - [ ] Defer
-                """
-            ),
-        )
-        created.append(str(skill_evo_template))
-
-    reflection_template = TEMPLATES_DIR / "reflection-multi-role.md"
-    if not reflection_template.exists():
-        atomic_write(
-            reflection_template,
-            textwrap.dedent(
-                """\
-                # Multi-Role Reflection Template
-
-                ## Scout
-                - What changed in the landscape?
-
-                ## Builder
-                - What was implemented?
-
-                ## Critic
-                - What risks or quality issues remain?
-
-                ## Reflector
-                - What should become durable knowledge?
-                """
-            ),
-        )
-        created.append(str(reflection_template))
-
-    return {"created": created, "sync_philosophy": sync_philosophy}
-
-
-def parse_last_human_activity() -> Optional[dt.datetime]:
-    data = read_json(LAST_HUMAN_ACTIVITY_PATH, default={})
-    if not data:
-        return None
-    for key in ("lastHumanMessageAt", "last_message_at", "timestamp"):
-        if key in data:
-            parsed = parse_iso_or_epoch(data[key])
-            if parsed:
-                return parsed
-    return None
-
-
-def minutes_since(timestamp: Optional[dt.datetime], now: Optional[dt.datetime] = None) -> Optional[float]:
-    if timestamp is None:
-        return None
-    now = now or utc_now()
-    delta = now - timestamp
-    return delta.total_seconds() / 60.0
-
-
-def load_budget_state(config: Dict[str, Any]) -> Dict[str, Any]:
-    default_daily = float(config.get("daily_budget_gbp", 2.0))
-    default_reserve = float(config.get("reserve_budget_gbp", 0.2))
-    default_remaining = max(default_daily - default_reserve, 0.0)
-
-    state = read_json(
-        BUDGET_STATE_PATH,
-        default={
-            "date": utc_now().date().isoformat(),
-            "daily_budget_gbp": default_daily,
-            "reserve_budget_gbp": default_reserve,
-            "used_gbp": 0.0,
-            "remaining_gbp": default_remaining,
-            "runs": [],
-        },
-    )
-
-    today = utc_now().date().isoformat()
-    if state.get("date") != today:
-        state = {
-            "date": today,
-            "daily_budget_gbp": default_daily,
-            "reserve_budget_gbp": default_reserve,
-            "used_gbp": 0.0,
-            "remaining_gbp": default_remaining,
-            "runs": [],
-        }
-
-    # Reconcile config drift.
-    state["daily_budget_gbp"] = default_daily
-    state["reserve_budget_gbp"] = default_reserve
-    if "remaining_gbp" not in state:
-        state["remaining_gbp"] = max(default_daily - default_reserve - state.get("used_gbp", 0.0), 0.0)
-
-    return state
-
-
-def consume_budget(state: Dict[str, Any], mode: str, config: Dict[str, Any]) -> Tuple[bool, float, str]:
-    mode_costs = config.get("mode_costs_gbp", {})
-    cost = float(mode_costs.get(mode, 0.05))
-    remaining = float(state.get("remaining_gbp", 0.0))
-    if remaining < cost:
-        return False, cost, "insufficient_budget"
-
-    state["used_gbp"] = round(float(state.get("used_gbp", 0.0)) + cost, 4)
-    state["remaining_gbp"] = round(remaining - cost, 4)
-    return True, cost, "ok"
-
-
-def fetch_json(url: str, headers: Optional[Dict[str, str]] = None, timeout: int = DEFAULT_TIMEOUT) -> Any:
-    req_headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
-    if headers:
-        req_headers.update(headers)
-    req = urllib.request.Request(url, headers=req_headers)
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return json.loads(resp.read().decode("utf-8"))
-
-
-def fetch_reddit(subreddit: str, limit: int) -> List[Candidate]:
-    urls = [
-        f"https://www.reddit.com/r/{subreddit}/hot.json?limit={limit}&raw_json=1",
-        f"https://old.reddit.com/r/{subreddit}/hot.json?limit={limit}&raw_json=1",
-    ]
-    payload = None
-    last_exc: Optional[Exception] = None
-    for url in urls:
-        try:
-            payload = fetch_json(url)
-            break
-        except Exception as exc:  # pragma: no cover - network best effort
-            last_exc = exc
-    if payload is None:
-        raise RuntimeError(f"reddit fetch failed: {last_exc}")
-    children = payload.get("data", {}).get("children", [])
-    out: List[Candidate] = []
-    for child in children:
-        data = child.get("data", {})
-        if data.get("stickied"):
-            continue
-        title = data.get("title")
-        link = data.get("url")
-        if not title or not link:
-            continue
-        engagement = float(data.get("ups", 0)) + float(data.get("num_comments", 0))
-        created_ts = parse_iso_or_epoch(float(data.get("created_utc", 0))) or utc_now()
-        out.append(
-            Candidate(
-                source=f"reddit/r/{subreddit}",
-                title=title,
-                url=link,
-                engagement=engagement,
-                created_at=created_ts,
-            )
-        )
-    return out
-
-
-def fetch_hackernews(limit: int) -> List[Candidate]:
-    ids = fetch_json("https://hacker-news.firebaseio.com/v0/topstories.json")
-    out: List[Candidate] = []
-    for item_id in ids[: max(limit * 3, 30)]:
-        item = fetch_json(f"https://hacker-news.firebaseio.com/v0/item/{item_id}.json")
-        if item.get("type") != "story":
-            continue
-        title = item.get("title") or ""
-        if not title:
-            continue
-        words = set(re.findall(r"[a-zA-Z]{2,}", title.lower()))
-        if not (words & AI_HINT_TERMS):
-            continue
-        out.append(
-            Candidate(
-                source="hackernews",
-                title=title,
-                url=item.get("url") or f"https://news.ycombinator.com/item?id={item_id}",
-                engagement=float(item.get("score", 0)) + float(item.get("descendants", 0)),
-                created_at=parse_iso_or_epoch(float(item.get("time", 0))) or utc_now(),
-            )
-        )
-        if len(out) >= limit:
-            break
-    return out
-
-
-def fetch_github_repos(query: str, limit: int) -> List[Candidate]:
-    q = urllib.parse.quote(query)
-    url = f"https://api.github.com/search/repositories?q={q}&sort=stars&order=desc&per_page={limit}"
-    payload = fetch_json(url, headers={"Accept": "application/vnd.github+json"})
-    out: List[Candidate] = []
-    for repo in payload.get("items", []):
-        name = repo.get("full_name", "unknown")
-        title = f"{name}: {repo.get('description') or 'No description'}"
-        updated_at = parse_iso_or_epoch(repo.get("updated_at")) or utc_now()
-        out.append(
-            Candidate(
-                source="github/search",
-                title=title,
-                url=repo.get("html_url") or "https://github.com",
-                engagement=float(repo.get("stargazers_count", 0)),
-                created_at=updated_at,
-            )
-        )
-    return out
-
-
-def discover_candidates(config: Dict[str, Any]) -> Tuple[List[Candidate], List[str]]:
-    candidates: List[Candidate] = []
-    errors: List[str] = []
-    for source in config.get("sources", []):
-        src_type = source.get("type")
-        try:
-            if src_type == "reddit":
-                items = fetch_reddit(source["subreddit"], int(source.get("limit", 10)))
-            elif src_type == "hackernews":
-                items = fetch_hackernews(int(source.get("limit", 20)))
-            elif src_type == "github":
-                items = fetch_github_repos(source.get("query", "agentic ai"), int(source.get("limit", 10)))
-            else:
-                errors.append(f"unknown source type: {src_type}")
-                continue
-            candidates.extend(items)
-        except Exception as exc:  # pragma: no cover - best effort network
-            errors.append(f"{source.get('name', src_type)}: {exc}")
-    return candidates, errors
 
 
 def tokenize(text: str) -> List[str]:
@@ -558,35 +215,274 @@ def tokenize(text: str) -> List[str]:
         "while",
         "their",
     }
-    return [w for w in words if w not in stop]
+    return [word for word in words if word not in stop]
 
 
-def extract_keywords(limit: int = 150) -> List[str]:
-    intent_text = read_text(INTENT_PATH)
-    philosophy_text = read_text(PHILOSOPHY_RUNTIME_PATH)
+def config_hash(config: Dict[str, Any]) -> str:
+    payload = json.dumps(config, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def load_runtime_config(config_path: Path) -> Tuple[Dict[str, Any], List[str]]:
+    if not config_path.exists():
+        return {}, [f"Missing config: {config_path}"]
+    data = read_json(config_path, default={})
+    if not isinstance(data, dict):
+        return {}, [f"Invalid config JSON object: {config_path}"]
+    return data, []
+
+
+def validate_runtime_config(config: Dict[str, Any]) -> Tuple[List[str], List[str]]:
+    errors: List[str] = []
+    warnings: List[str] = []
+
+    if not isinstance(config.get("mode_profiles"), dict):
+        errors.append("mode_profiles must be an object")
+    else:
+        for mode in ("micro", "deep", "research_deep"):
+            profile = config["mode_profiles"].get(mode)
+            if not isinstance(profile, dict):
+                errors.append(f"mode_profiles.{mode} must be an object")
+                continue
+            for key in ("enabled", "max_items", "max_run_cost", "validation", "delegation"):
+                if key not in profile:
+                    errors.append(f"mode_profiles.{mode}.{key} is required")
+            if isinstance(profile.get("max_items"), (int, float)) and profile.get("max_items", 0) <= 0:
+                errors.append(f"mode_profiles.{mode}.max_items must be > 0")
+
+    routing = config.get("routing")
+    if not isinstance(routing, dict):
+        errors.append("routing must be an object")
+    else:
+        required_routing = (
+            "auto_safe_threshold",
+            "policy_guarded_threshold",
+            "defer_threshold",
+            "min_relevance_threshold",
+            "allow_policy_guarded_auto",
+            "guarded_keywords",
+            "always_human_gate_keywords",
+        )
+        for key in required_routing:
+            if key not in routing:
+                errors.append(f"routing.{key} is required")
+
+    if not isinstance(config.get("paths"), dict):
+        errors.append("paths must be an object")
+
+    if "sources" not in config:
+        warnings.append("sources missing; discovery will produce no candidates")
+
+    return errors, warnings
+
+
+def resolve_runtime_paths(config: Dict[str, Any], workspace_root: Path, project_root: Path) -> RuntimePaths:
+    paths_cfg = config.get("paths", {})
+
+    def path_for(key: str, default_value: str) -> Path:
+        return resolve_path_value(str(paths_cfg.get(key, default_value)), workspace_root)
+
+    proposals_dir = path_for("proposals_dir", "memory/proposals")
+    metrics_dir = path_for("metrics_dir", "memory/metrics")
+
+    return RuntimePaths(
+        intent_path=path_for("intent_path", "memory/INTENT.md"),
+        reflect_path=path_for("reflect_path", "memory/REFLECT.md"),
+        philosophy_path=path_for("philosophy_path", "memory/PHILOSOPHY.md"),
+        philosophy_fallback_path=path_for(
+            "philosophy_fallback_path",
+            str(project_root / "philosophy" / "PHILOSOPHY.md"),
+        ),
+        proposals_dir=proposals_dir,
+        inbox_dir=proposals_dir / "inbox",
+        approved_dir=proposals_dir / "approved",
+        rejected_dir=proposals_dir / "rejected",
+        deferred_dir=proposals_dir / "deferred",
+        briefings_dir=path_for("briefings_dir", "memory/briefings"),
+        metrics_dir=metrics_dir,
+        budget_state_path=path_for("budget_state_path", "data/intention-engine-budget.json"),
+        lock_path=path_for("lock_path", "memory/metrics/intention-engine.lock"),
+        logs_path=path_for("logs_path", "logs/engine.jsonl"),
+        replay_dir=path_for("replay_dir", "data/intention-engine-runs"),
+        cron_jobs_path=path_for("cron_jobs_path", "~/.openclaw/cron/jobs.json"),
+    )
+
+
+def ensure_runtime_directories(paths: RuntimePaths) -> None:
+    for directory in (
+        paths.proposals_dir,
+        paths.inbox_dir,
+        paths.approved_dir,
+        paths.rejected_dir,
+        paths.deferred_dir,
+        paths.metrics_dir,
+        paths.briefings_dir,
+        paths.replay_dir,
+        paths.logs_path.parent,
+        paths.lock_path.parent,
+        paths.budget_state_path.parent,
+    ):
+        directory.mkdir(parents=True, exist_ok=True)
+
+
+def fetch_json(url: str, headers: Optional[Dict[str, str]] = None, timeout: int = DEFAULT_TIMEOUT) -> Any:
+    req_headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
+    if headers:
+        req_headers.update(headers)
+    req = urllib.request.Request(url, headers=req_headers)
+    with urllib.request.urlopen(req, timeout=timeout) as response:
+        return json.loads(response.read().decode("utf-8"))
+
+
+def fetch_reddit(subreddit: str, limit: int) -> List[Candidate]:
+    url = f"https://www.reddit.com/r/{subreddit}/hot.json?limit={limit}&raw_json=1"
+    payload = fetch_json(url)
+    children = payload.get("data", {}).get("children", [])
+    output: List[Candidate] = []
+    for child in children:
+        data = child.get("data", {})
+        if data.get("stickied"):
+            continue
+        title = data.get("title")
+        link = data.get("url")
+        if not title or not link:
+            continue
+        engagement = float(data.get("ups", 0)) + float(data.get("num_comments", 0))
+        created_ts = dt.datetime.fromtimestamp(float(data.get("created_utc", 0)), tz=dt.timezone.utc)
+        output.append(
+            Candidate(
+                source=f"reddit/r/{subreddit}",
+                title=title,
+                url=link,
+                engagement=engagement,
+                created_at=created_ts,
+            )
+        )
+    return output
+
+
+def fetch_hackernews(limit: int) -> List[Candidate]:
+    ids = fetch_json("https://hacker-news.firebaseio.com/v0/topstories.json")
+    output: List[Candidate] = []
+    for item_id in ids[: max(limit * 3, 30)]:
+        item = fetch_json(f"https://hacker-news.firebaseio.com/v0/item/{item_id}.json")
+        if item.get("type") != "story":
+            continue
+        title = item.get("title") or ""
+        if not title:
+            continue
+        title_words = set(re.findall(r"[a-zA-Z]{2,}", title.lower()))
+        if not (title_words & AI_HINT_TERMS):
+            continue
+        engagement = float(item.get("score", 0)) + float(item.get("descendants", 0))
+        created_ts = dt.datetime.fromtimestamp(float(item.get("time", 0)), tz=dt.timezone.utc)
+        output.append(
+            Candidate(
+                source="hackernews",
+                title=title,
+                url=item.get("url") or f"https://news.ycombinator.com/item?id={item_id}",
+                engagement=engagement,
+                created_at=created_ts,
+            )
+        )
+        if len(output) >= limit:
+            break
+    return output
+
+
+def fetch_github_repos(query: str, limit: int) -> List[Candidate]:
+    encoded_query = urllib.parse.quote(query)
+    url = f"https://api.github.com/search/repositories?q={encoded_query}&sort=stars&order=desc&per_page={limit}"
+    payload = fetch_json(url, headers={"Accept": "application/vnd.github+json"})
+    output: List[Candidate] = []
+    for repo in payload.get("items", []):
+        name = repo.get("full_name", "unknown")
+        title = f"{name}: {repo.get('description') or 'No description'}"
+        updated_at = parse_datetime(str(repo.get("updated_at", "")))
+        output.append(
+            Candidate(
+                source="github/search",
+                title=title,
+                url=repo.get("html_url") or "https://github.com",
+                engagement=float(repo.get("stargazers_count", 0)),
+                created_at=updated_at,
+            )
+        )
+    return output
+
+
+def load_fixture_candidates(source: Dict[str, Any]) -> List[Candidate]:
+    output: List[Candidate] = []
+    for item in source.get("items", []):
+        title = str(item.get("title", "")).strip()
+        url = str(item.get("url", "")).strip()
+        if not title or not url:
+            continue
+        created = parse_datetime(str(item.get("created_at", to_iso8601(utc_now()))))
+        output.append(
+            Candidate(
+                source=str(source.get("name", "fixture")),
+                title=title,
+                url=url,
+                engagement=float(item.get("engagement", 1.0)),
+                created_at=created,
+            )
+        )
+    return output
+
+
+def discover_candidates(config: Dict[str, Any]) -> Tuple[List[Candidate], List[str]]:
+    candidates: List[Candidate] = []
+    errors: List[str] = []
+
+    for source in config.get("sources", []):
+        source_type = source.get("type")
+        try:
+            if source_type == "reddit":
+                items = fetch_reddit(str(source["subreddit"]), int(source.get("limit", 10)))
+            elif source_type == "hackernews":
+                items = fetch_hackernews(int(source.get("limit", 20)))
+            elif source_type == "github":
+                items = fetch_github_repos(str(source.get("query", "agentic ai")), int(source.get("limit", 10)))
+            elif source_type == "fixture":
+                items = load_fixture_candidates(source)
+            else:
+                errors.append(f"unknown source type: {source_type}")
+                continue
+            candidates.extend(items)
+        except Exception as exc:  # pragma: no cover - external IO
+            errors.append(f"{source.get('name', source_type)}: {exc}")
+
+    return candidates, errors
+
+
+def extract_keywords(paths: RuntimePaths, limit: int = 150) -> List[str]:
+    intent_text = read_text(paths.intent_path)
+    philosophy_text = read_text(paths.philosophy_path)
+    if not philosophy_text:
+        philosophy_text = read_text(paths.philosophy_fallback_path)
+
     combined = tokenize(intent_text + "\n" + philosophy_text)
-    freq: Dict[str, int] = {}
+    frequency: Dict[str, int] = {}
     for word in combined:
-        freq[word] = freq.get(word, 0) + 1
-    ordered = sorted(freq.items(), key=lambda kv: kv[1], reverse=True)
-    return [w for w, _ in ordered[:limit]]
+        frequency[word] = frequency.get(word, 0) + 1
+    ordered = sorted(frequency.items(), key=lambda item: item[1], reverse=True)
+    return [word for word, _ in ordered[:limit]]
 
 
-def classify_risk(title: str, url: str, external_keywords: Iterable[str]) -> Tuple[float, bool, str]:
+def classify_risk(title: str, url: str, routing: Dict[str, Any]) -> Tuple[float, bool, str]:
     haystack = f"{title} {url}".lower()
-    external_sensitive = any(kw.lower() in haystack for kw in external_keywords)
+    human_keywords = [str(term).lower() for term in routing.get("always_human_gate_keywords", [])]
+    guarded_keywords = [str(term).lower() for term in routing.get("guarded_keywords", [])]
 
-    if external_sensitive:
-        return 0.9, True, "human_gate"
-
-    guarded_terms = ["integrate", "migration", "migrate", "replace", "security", "credential", "oauth", "auth"]
-    if any(term in haystack for term in guarded_terms):
+    if any(term and term in haystack for term in human_keywords):
+        return 0.95, False, "human_gate"
+    if any(term and term in haystack for term in guarded_keywords):
         return 0.55, False, "policy_guarded"
-
     return 0.25, False, "auto_safe"
 
 
-def score_candidate(candidate: Candidate, keywords: List[str], config: Dict[str, Any]) -> ScoredCandidate:
+def score_candidate(candidate: Candidate, keywords: List[str], routing: Dict[str, Any], now: dt.datetime) -> ScoredCandidate:
     title_tokens = set(tokenize(candidate.title))
     keyword_set = set(keywords)
     overlap_count = len(title_tokens & keyword_set)
@@ -595,15 +491,15 @@ def score_candidate(candidate: Candidate, keywords: List[str], config: Dict[str,
     title_words = set(re.findall(r"[a-zA-Z]{2,}", candidate.title.lower()))
     ai_signal = clamp(len(title_words & AI_HINT_TERMS) / 3.0, 0.0, 1.0)
     low_signal = 1.0 if (title_words & LOW_SIGNAL_TITLE_TERMS) else 0.0
-
     engagement_norm = clamp(math.log1p(max(candidate.engagement, 0.0)) / 8.0, 0.0, 1.0)
+
     value = clamp(
         (0.05 + (0.55 * relevance) + (0.20 * ai_signal) + (0.20 * engagement_norm)) - (0.25 * low_signal),
         0.01,
         1.0,
     )
 
-    age_hours = max((utc_now() - candidate.created_at).total_seconds() / 3600.0, 0.0)
+    age_hours = max((now - candidate.created_at).total_seconds() / 3600.0, 0.0)
     urgency = clamp(1.0 - min(age_hours, 96.0) / 96.0, 0.1, 1.0)
 
     effort = 0.75
@@ -613,12 +509,7 @@ def score_candidate(candidate: Candidate, keywords: List[str], config: Dict[str,
     if any(term in title_lc for term in ["deep", "survey", "comprehensive"]):
         effort = 1.1
 
-    risk, external_sensitive, autonomy_class = classify_risk(
-        candidate.title,
-        candidate.url,
-        config.get("external_action_keywords", []),
-    )
-
+    risk, external_sensitive, autonomy_class = classify_risk(candidate.title, candidate.url, routing)
     raw_score = (value * urgency) / (max(effort, 0.1) * max(risk, 0.15))
     score = clamp(raw_score * (0.25 + (0.75 * max(relevance, ai_signal))), 0.0, 2.0)
 
@@ -635,34 +526,71 @@ def score_candidate(candidate: Candidate, keywords: List[str], config: Dict[str,
     )
 
 
-def next_proposal_index(prefix_date: str) -> int:
-    pattern = re.compile(rf"^P-{re.escape(prefix_date)}-(\d{{3}})")
+def route_from_values(score: float, relevance: float, autonomy_class: str, routing: Dict[str, Any]) -> str:
+    min_relevance = float(routing.get("min_relevance_threshold", 0.08))
+    defer_threshold = float(routing.get("defer_threshold", 0.45))
+    auto_safe_threshold = float(routing.get("auto_safe_threshold", 0.75))
+    policy_guarded_threshold = float(routing.get("policy_guarded_threshold", 0.70))
+    allow_policy_guarded_auto = bool(routing.get("allow_policy_guarded_auto", False))
+
+    if relevance < min_relevance:
+        return "deferred"
+    if score < defer_threshold:
+        return "deferred"
+    if autonomy_class == "human_gate":
+        return "inbox"
+    if autonomy_class == "auto_safe" and score >= auto_safe_threshold:
+        return "approved"
+    if autonomy_class == "policy_guarded" and score >= policy_guarded_threshold:
+        return "approved" if allow_policy_guarded_auto else "inbox"
+    return "inbox"
+
+
+def route_candidate(scored: ScoredCandidate, routing: Dict[str, Any]) -> str:
+    return route_from_values(scored.score, scored.relevance, scored.autonomy_class, routing)
+
+
+def next_proposal_index(paths: RuntimePaths, prefix_date: str) -> int:
+    pattern = re.compile(rf"^P-{re.escape(prefix_date)}-(\\d{{3}})")
     max_id = 0
-    for directory in [INBOX_DIR, APPROVED_DIR, DEFERRED_DIR, REJECTED_DIR]:
+    for directory in [paths.inbox_dir, paths.approved_dir, paths.deferred_dir, paths.rejected_dir]:
         if not directory.exists():
             continue
-        for path in directory.glob("*.md"):
-            match = pattern.match(path.stem)
+        for candidate in directory.glob("*.md"):
+            match = pattern.match(candidate.stem)
             if match:
                 max_id = max(max_id, int(match.group(1)))
     return max_id + 1
 
 
-def existing_proposal_slugs() -> set[str]:
+def existing_proposal_slugs(paths: RuntimePaths) -> set[str]:
     slugs: set[str] = set()
-    pattern = re.compile(r"^P-\d{4}-\d{2}-\d{2}-\d{3}-(.+)$")
-    for directory in [INBOX_DIR, APPROVED_DIR, DEFERRED_DIR, REJECTED_DIR]:
+    pattern = re.compile(r"^P-\\d{4}-\\d{2}-\\d{2}-\\d{3}-(.+)$")
+    for directory in [paths.inbox_dir, paths.approved_dir, paths.deferred_dir, paths.rejected_dir]:
         if not directory.exists():
             continue
-        for path in directory.glob("*.md"):
-            match = pattern.match(path.stem)
+        for candidate in directory.glob("*.md"):
+            match = pattern.match(candidate.stem)
             if match:
                 slugs.add(match.group(1))
     return slugs
 
 
-def proposal_markdown(proposal: Proposal) -> str:
-    created_iso = proposal.created_at.isoformat()
+def build_proposal(scored: ScoredCandidate, proposal_id: str, paths: RuntimePaths) -> Proposal:
+    return Proposal(
+        proposal_id=proposal_id,
+        title=scored.candidate.title,
+        source=scored.candidate.source,
+        url=scored.candidate.url,
+        created_at=scored.candidate.created_at,
+        score=scored.score,
+        relevance=scored.relevance,
+        autonomy_class=scored.autonomy_class,
+        filepath=paths.inbox_dir / f"{proposal_id}-{slugify(scored.candidate.title)}.md",
+    )
+
+
+def proposal_markdown(proposal: Proposal, scored: ScoredCandidate, route: str) -> str:
     return textwrap.dedent(
         f"""\
         ---
@@ -670,123 +598,37 @@ def proposal_markdown(proposal: Proposal) -> str:
         title: {proposal.title}
         source: {proposal.source}
         url: {proposal.url}
-        created_at: {created_iso}
-        saga_id: {proposal.saga_id}
-        chapter_id: {proposal.chapter_id}
-        alignment:
-          philosophy: {proposal.relevance:.2f}
-          active_intent: {proposal.relevance:.2f}
-        impact_score: {proposal.value:.2f}
-        risk_score: {proposal.risk:.2f}
+        created_at: {to_iso8601(proposal.created_at)}
+        score: {proposal.score:.3f}
+        relevance: {proposal.relevance:.2f}
         autonomy_class: {proposal.autonomy_class}
-        recommended_action: {proposal.recommended_action}
-        acceptance_test: {proposal.acceptance_test}
-        narrative_reason: {proposal.narrative_reason}
-        evidence_target: {proposal.evidence_target}
+        routed_to: {route}
         ---
 
         # {proposal.title}
 
-        ## Why It Matters
-        {proposal.narrative_reason}
-
-        ## Recommended Action
-        {proposal.recommended_action}
-
-        ## Evidence Target
-        {proposal.evidence_target}
-
-        ## Acceptance Test
-        {proposal.acceptance_test}
+        ## Source
+        {proposal.source}: {proposal.url}
 
         ## Scoring
         - score: {proposal.score:.3f}
-        - value: {proposal.value:.3f}
-        - urgency: {proposal.urgency:.3f}
-        - effort: {proposal.effort:.3f}
-        - risk: {proposal.risk:.3f}
+        - relevance: {proposal.relevance:.3f}
+        - value: {scored.value:.3f}
+        - urgency: {scored.urgency:.3f}
+        - effort: {scored.effort:.3f}
+        - risk: {scored.risk:.3f}
         - autonomy_class: `{proposal.autonomy_class}`
+        - routed_to: `{route}`
         """
     )
 
 
-def build_proposal(scored: ScoredCandidate, config: Dict[str, Any], proposal_id: str) -> Proposal:
-    saga_id = config.get("intake", {}).get("default_saga_id", "S02")
-    chapter_id = config.get("intake", {}).get("default_chapter_id", "C06")
-
-    title = scored.candidate.title.strip().replace("\n", " ")
-    narrative_reason = (
-        "Matches active Intention Engine goals for proactive discovery and narrative-driven execution. "
-        f"Relevance score {scored.relevance:.2f} from current INTENT + PHILOSOPHY context."
-    )
-    recommended_action = (
-        f"Run a 60-minute spike on '{title[:80]}', capture findings in memory/knowledge, "
-        "and convert into one executable intention if value remains high."
-    )
-    evidence_target = "Published memo or implementation artifact linked in INTENT entry"
-    acceptance_test = "Actionable summary includes fit, effort, risk, and next step recommendation"
-
-    filename = f"{proposal_id}-{slugify(title)}.md"
-    filepath = INBOX_DIR / filename
-
-    return Proposal(
-        proposal_id=proposal_id,
-        title=title,
-        source=scored.candidate.source,
-        url=scored.candidate.url,
-        created_at=scored.candidate.created_at,
-        score=scored.score,
-        relevance=scored.relevance,
-        value=scored.value,
-        urgency=scored.urgency,
-        effort=scored.effort,
-        risk=scored.risk,
-        autonomy_class=scored.autonomy_class,
-        external_sensitive=scored.external_sensitive,
-        saga_id=saga_id,
-        chapter_id=chapter_id,
-        recommended_action=recommended_action,
-        narrative_reason=narrative_reason,
-        evidence_target=evidence_target,
-        acceptance_test=acceptance_test,
-        filepath=filepath,
-    )
-
-
-def route_proposal(proposal: Proposal, config: Dict[str, Any]) -> str:
-    routing = config.get("routing", {})
-    auto_safe_threshold = float(routing.get("auto_safe_threshold", 0.75))
-    guarded_threshold = float(routing.get("policy_guarded_threshold", 0.70))
-    defer_threshold = float(routing.get("defer_threshold", 0.45))
-    min_relevance_threshold = float(routing.get("min_relevance_threshold", 0.08))
-    allow_guarded_auto = bool(routing.get("allow_policy_guarded_auto", True))
-
-    if proposal.relevance < min_relevance_threshold:
-        return "deferred"
-
-    if proposal.score < defer_threshold:
-        return "deferred"
-
-    if proposal.autonomy_class == "human_gate":
-        return "inbox"
-
-    if proposal.autonomy_class == "auto_safe" and proposal.score >= auto_safe_threshold:
-        return "approved"
-
-    if proposal.autonomy_class == "policy_guarded":
-        if allow_guarded_auto and proposal.score >= guarded_threshold and not proposal.external_sensitive:
-            return "approved"
-        return "inbox"
-
-    return "inbox"
-
-
-def move_proposal(path: Path, destination_bucket: str) -> Path:
+def move_proposal(path: Path, destination_bucket: str, paths: RuntimePaths) -> Path:
     destination_dir = {
-        "approved": APPROVED_DIR,
-        "inbox": INBOX_DIR,
-        "rejected": REJECTED_DIR,
-        "deferred": DEFERRED_DIR,
+        "approved": paths.approved_dir,
+        "inbox": paths.inbox_dir,
+        "rejected": paths.rejected_dir,
+        "deferred": paths.deferred_dir,
     }[destination_bucket]
     destination_dir.mkdir(parents=True, exist_ok=True)
     target = destination_dir / path.name
@@ -796,385 +638,620 @@ def move_proposal(path: Path, destination_bucket: str) -> Path:
     return target
 
 
-def next_intention_id(intent_text: str) -> int:
-    ids = [int(m.group(1)) for m in re.finditer(r"\[I(\d+)\]", intent_text)]
-    if not ids:
-        return 1
-    return max(ids) + 1
+def default_budget_state(config: Dict[str, Any], run_date: dt.date) -> Dict[str, Any]:
+    daily_budget = float(config.get("daily_budget_gbp", 2.0))
+    reserve_budget = float(config.get("reserve_budget_gbp", 0.2))
+    return {
+        "date": run_date.isoformat(),
+        "daily_budget_gbp": daily_budget,
+        "reserve_budget_gbp": reserve_budget,
+        "used_gbp": 0.0,
+        "remaining_gbp": max(daily_budget - reserve_budget, 0.0),
+        "runs": [],
+    }
 
 
-def ensure_generated_intake_section(intent_text: str, saga_id: str, chapter_id: str) -> str:
-    marker = "## Autonomous Intake (Generated)"
-    if marker in intent_text:
-        return intent_text
-
-    block = textwrap.dedent(
-        f"""
-
-        {marker}
-        - Parent Saga: {saga_id}
-        - Parent Chapter: {chapter_id}
-
-        ### Intentions
-        """
-    )
-    return intent_text.rstrip() + block + "\n"
+def load_budget_state(paths: RuntimePaths, config: Dict[str, Any], run_date: dt.date) -> Dict[str, Any]:
+    state = read_json(paths.budget_state_path, default_budget_state(config, run_date))
+    if state.get("date") != run_date.isoformat():
+        state = default_budget_state(config, run_date)
+    return state
 
 
-def insert_intention_from_proposal(proposal: Proposal, config: Dict[str, Any]) -> Optional[str]:
-    if not INTENT_PATH.exists():
-        return None
-
-    intent_text = read_text(INTENT_PATH)
-    saga_id = config.get("intake", {}).get("default_saga_id", "S02")
-    chapter_id = config.get("intake", {}).get("default_chapter_id", "C06")
-    status = config.get("intake", {}).get("default_intent_status", "NEXT")
-
-    if f"] {proposal.title}" in intent_text or proposal.proposal_id in intent_text:
-        return None
-
-    intent_text = ensure_generated_intake_section(intent_text, saga_id, chapter_id)
-    new_id = next_intention_id(intent_text)
-
-    entry = textwrap.dedent(
-        f"""\
-        - **[I{new_id:02d}]** [{status}] {proposal.title}
-          - Source: {proposal.source}
-          - Proposal: {proposal.proposal_id}
-          - Narrative reason: {proposal.narrative_reason}
-          - Evidence target: {proposal.evidence_target}
-        """
-    )
-
-    marker = "## Autonomous Intake (Generated)"
-    section_start = intent_text.find(marker)
-    if section_start < 0:
-        updated = intent_text.rstrip() + "\n" + entry
-    else:
-        # Append at end to keep logic deterministic and avoid fragile parsing.
-        updated = intent_text.rstrip() + "\n" + entry + "\n"
-
-    atomic_write(INTENT_PATH, updated)
-    return f"I{new_id:02d}"
+def consume_budget(state: Dict[str, Any], mode: str, profile: Dict[str, Any]) -> Tuple[bool, float, str]:
+    cost = float(profile.get("max_run_cost", 0.0))
+    remaining = float(state.get("remaining_gbp", 0.0))
+    if remaining < cost:
+        return False, cost, "insufficient_budget"
+    state["used_gbp"] = round(float(state.get("used_gbp", 0.0)) + cost, 4)
+    state["remaining_gbp"] = round(remaining - cost, 4)
+    return True, cost, "ok"
 
 
-def append_reflect_entry(mode: str, run_summary: Dict[str, Any]) -> None:
-    timestamp = utc_now().strftime("%Y-%m-%d %H:%M UTC")
+def append_reflect_entry(paths: RuntimePaths, mode: str, run_summary: Dict[str, Any], run_started: dt.datetime) -> None:
+    timestamp = run_started.strftime("%Y-%m-%d %H:%M UTC")
     entry = textwrap.dedent(
         f"""\
 
-        ## {timestamp} — Intention Engine {mode} run
-        **What happened:**
+        ## {timestamp} - Intention Engine {mode} run
+        - run id: {run_summary.get('run_id')}
         - candidates discovered: {run_summary.get('candidates_discovered', 0)}
         - proposals created: {run_summary.get('proposals_created', 0)}
         - approved: {run_summary.get('approved', 0)}
         - deferred: {run_summary.get('deferred', 0)}
         - awaiting human gate: {run_summary.get('awaiting_human_gate', 0)}
-
-        **Budget:**
-        - run cost: £{run_summary.get('run_cost_gbp', 0):.2f}
-        - remaining: £{run_summary.get('budget_remaining_gbp', 0):.2f}
-
-        **Notes:**
-        - non-blocking mode: background-safe execution
-        - network errors: {run_summary.get('network_errors', 0)}
+        - run cost: GBP {run_summary.get('run_cost_gbp', 0):.2f}
+        - remaining budget: GBP {run_summary.get('budget_remaining_gbp', 0):.2f}
         """
     )
-    current = read_text(REFLECT_PATH)
-    atomic_write(REFLECT_PATH, current.rstrip() + entry + "\n")
+    current = read_text(paths.reflect_path)
+    atomic_write(paths.reflect_path, current.rstrip() + entry + "\n")
 
 
-def update_metrics(run_summary: Dict[str, Any]) -> Path:
-    date_key = utc_now().date().isoformat()
-    metrics_path = METRICS_DIR / f"intention-engine-{date_key}.json"
+def update_metrics(paths: RuntimePaths, run_summary: Dict[str, Any], run_started: dt.datetime) -> Path:
+    date_key = run_started.date().isoformat()
+    metrics_path = paths.metrics_dir / f"intention-engine-{date_key}.json"
     payload = read_json(metrics_path, default={"date": date_key, "runs": []})
     payload.setdefault("runs", []).append(run_summary)
     payload["total_runs"] = len(payload["runs"])
-    payload["total_proposals"] = sum(r.get("proposals_created", 0) for r in payload["runs"])
-    payload["total_approved"] = sum(r.get("approved", 0) for r in payload["runs"])
-    payload["total_deferred"] = sum(r.get("deferred", 0) for r in payload["runs"])
-    payload["total_human_gate"] = sum(r.get("awaiting_human_gate", 0) for r in payload["runs"])
+    payload["total_proposals"] = sum(run.get("proposals_created", 0) for run in payload["runs"])
     atomic_write_json(metrics_path, payload)
     return metrics_path
 
 
-def run_engine(mode: str, force: bool, dry_run: bool) -> Dict[str, Any]:
-    config = load_config(CONFIG_PATH)
+def write_engine_log(paths: RuntimePaths, level: str, event: str, message: str, extra: Optional[Dict[str, Any]] = None) -> None:
+    payload: Dict[str, Any] = {
+        "timestamp": to_iso8601(utc_now()),
+        "level": level,
+        "event": event,
+        "message": message,
+    }
+    if extra:
+        payload["extra"] = extra
+    write_jsonl(paths.logs_path, payload)
 
-    with file_lock(LOCK_PATH):
-        ensure_runtime_structure(sync_philosophy=False)
 
-        now = utc_now()
-        last_human = parse_last_human_activity()
-        idle_minutes = minutes_since(last_human, now)
+def write_replay_bundle(
+    paths: RuntimePaths,
+    run_id: str,
+    inputs_payload: Dict[str, Any],
+    scores_payload: Dict[str, Any],
+    decisions_payload: Dict[str, Any],
+    config_digest: str,
+) -> Path:
+    run_dir = paths.replay_dir / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    atomic_write_json(run_dir / "inputs.json", inputs_payload)
+    atomic_write_json(run_dir / "scores.json", scores_payload)
+    atomic_write_json(run_dir / "decisions.json", decisions_payload)
+    atomic_write(run_dir / "config-hash.txt", config_digest + "\n")
+    return run_dir
 
-        idle_threshold = float(config.get("idle_threshold_minutes", 5))
-        if mode == "micro" and not force:
-            if idle_minutes is not None and idle_minutes <= idle_threshold:
-                return {
-                    "status": "skipped_active_human",
-                    "mode": mode,
-                    "idle_minutes": round(idle_minutes, 2),
-                    "idle_threshold_minutes": idle_threshold,
-                    "message": "micro run skipped to avoid main-thread interference",
-                }
 
-        budget_state = load_budget_state(config)
-        mode_cost = float(config.get("mode_costs_gbp", {}).get(mode, 0.05))
-        run_cost = mode_cost
-        if dry_run:
-            if float(budget_state.get("remaining_gbp", 0.0)) < mode_cost:
-                return {
-                    "status": "budget_blocked",
-                    "mode": mode,
-                    "reason": "insufficient_budget",
-                    "remaining_gbp": budget_state.get("remaining_gbp", 0.0),
-                    "required_gbp": mode_cost,
-                    "dry_run": True,
-                }
+def summarize_route_counts(routes: Iterable[str]) -> Tuple[int, int, int]:
+    approved = 0
+    deferred = 0
+    awaiting_human_gate = 0
+    for route in routes:
+        if route == "approved":
+            approved += 1
+        elif route == "deferred":
+            deferred += 1
         else:
-            ok, _, budget_reason = consume_budget(budget_state, mode, config)
+            awaiting_human_gate += 1
+    return approved, deferred, awaiting_human_gate
+
+
+def run_engine(mode: str, config: Dict[str, Any], paths: RuntimePaths, dry_run: bool = False) -> Dict[str, Any]:
+    run_started = utc_now()
+    run_id = f"{run_started.strftime('%Y%m%dT%H%M%S%fZ')}-{mode}"
+
+    mode_profiles = config.get("mode_profiles", {})
+    profile = mode_profiles.get(mode)
+    if not isinstance(profile, dict):
+        return {"status": "invalid_mode", "mode": mode, "message": f"Mode profile missing: {mode}"}
+    if not bool(profile.get("enabled", False)):
+        return {"status": "mode_disabled", "mode": mode, "message": f"Mode '{mode}' is disabled"}
+
+    routing = config.get("routing", {})
+
+    with file_lock(paths.lock_path):
+        ensure_runtime_directories(paths)
+
+        budget_state = load_budget_state(paths, config, run_started.date())
+        if dry_run:
+            run_cost = 0.0
+            budget_reason = "dry_run"
+        else:
+            ok, run_cost, budget_reason = consume_budget(budget_state, mode, profile)
             if not ok:
                 return {
                     "status": "budget_blocked",
                     "mode": mode,
                     "reason": budget_reason,
                     "remaining_gbp": budget_state.get("remaining_gbp", 0.0),
-                    "required_gbp": mode_cost,
+                    "required_gbp": float(profile.get("max_run_cost", 0.0)),
                 }
 
-        candidates, errors = discover_candidates(config)
-        keywords = extract_keywords(limit=200)
+        candidates, discovery_errors = discover_candidates(config)
+        keywords = extract_keywords(paths, limit=200)
+        scored = [score_candidate(candidate, keywords, routing, run_started) for candidate in candidates]
+        scored.sort(key=lambda item: item.score, reverse=True)
 
-        scored = [score_candidate(c, keywords, config) for c in candidates]
-        scored.sort(key=lambda s: s.score, reverse=True)
-
-        max_items = int(config.get("intake", {}).get(f"{mode}_max_items", 2 if mode == "micro" else 5))
+        max_items = int(profile.get("max_items", 1))
         picked = scored[:max_items]
 
-        proposal_index = next_proposal_index(now.date().isoformat())
-        existing_slugs = existing_proposal_slugs()
-        run_seen_slugs: set[str] = set()
+        proposal_index = next_proposal_index(paths, run_started.date().isoformat())
+        known_slugs = existing_proposal_slugs(paths)
+        run_slugs: set[str] = set()
 
-        proposals: List[Proposal] = []
-        idx = proposal_index
-        for item in picked:
-            candidate_slug = slugify(item.candidate.title)
-            if candidate_slug in existing_slugs or candidate_slug in run_seen_slugs:
+        decisions: List[Dict[str, Any]] = []
+        proposals_to_write: List[Tuple[Proposal, ScoredCandidate, str]] = []
+
+        index = proposal_index
+        for scored_item in picked:
+            candidate_slug = slugify(scored_item.candidate.title)
+            if candidate_slug in known_slugs or candidate_slug in run_slugs:
                 continue
 
-            proposal_id = f"P-{now.date().isoformat()}-{idx:03d}"
-            idx += 1
-            proposal = build_proposal(item, config, proposal_id)
-            proposals.append(proposal)
-            run_seen_slugs.add(candidate_slug)
+            proposal_id = f"P-{run_started.date().isoformat()}-{index:03d}"
+            index += 1
+            proposal = build_proposal(scored_item, proposal_id, paths)
+            route = route_candidate(scored_item, routing)
+            proposals_to_write.append((proposal, scored_item, route))
+            run_slugs.add(candidate_slug)
 
-        created = 0
-        approved = 0
-        deferred = 0
-        awaiting_human_gate = 0
-        inserted_intentions = 0
+            decisions.append(
+                {
+                    "proposal_id": proposal.proposal_id,
+                    "title": proposal.title,
+                    "url": proposal.url,
+                    "source": proposal.source,
+                    "score": round(scored_item.score, 6),
+                    "relevance": round(scored_item.relevance, 6),
+                    "autonomy_class": scored_item.autonomy_class,
+                    "route": route,
+                }
+            )
 
-        for proposal in proposals:
-            markdown = proposal_markdown(proposal)
-            if not dry_run:
-                atomic_write(proposal.filepath, markdown)
-            created += 1
+        approved, deferred, awaiting_human_gate = summarize_route_counts(item[2] for item in proposals_to_write)
 
-            route = route_proposal(proposal, config)
-            if route == "approved":
-                approved += 1
-            elif route == "deferred":
-                deferred += 1
-            else:
-                awaiting_human_gate += 1
+        for proposal, scored_item, route in proposals_to_write:
+            if dry_run:
+                continue
+            markdown = proposal_markdown(proposal, scored_item, route)
+            atomic_write(proposal.filepath, markdown)
+            proposal.filepath = move_proposal(proposal.filepath, route, paths)
 
-            if not dry_run:
-                final_path = move_proposal(proposal.filepath, route)
-                proposal.filepath = final_path
-
-                if (
-                    route == "approved"
-                    and bool(config.get("intake", {}).get("auto_insert_intentions", True))
-                ):
-                    inserted = insert_intention_from_proposal(proposal, config)
-                    if inserted:
-                        inserted_intentions += 1
-
-        run_summary = {
-            "timestamp": now.isoformat(),
+        inputs_payload = {
+            "run_id": run_id,
+            "started_at": to_iso8601(run_started),
             "mode": mode,
-            "status": "ok",
             "dry_run": dry_run,
-            "idle_minutes": None if idle_minutes is None else round(idle_minutes, 2),
-            "candidates_discovered": len(candidates),
-            "proposals_created": created,
-            "approved": approved,
-            "deferred": deferred,
-            "awaiting_human_gate": awaiting_human_gate,
-            "inserted_intentions": inserted_intentions,
-            "network_errors": len(errors),
-            "network_error_details": errors,
-            "run_cost_gbp": round(run_cost, 4),
-            "budget_remaining_gbp": round(float(budget_state.get("remaining_gbp", 0.0)), 4),
+            "mode_profile": profile,
+            "candidate_count": len(candidates),
+            "candidates": [
+                {
+                    "source": candidate.source,
+                    "title": candidate.title,
+                    "url": candidate.url,
+                    "engagement": round(candidate.engagement, 4),
+                    "created_at": to_iso8601(candidate.created_at),
+                }
+                for candidate in candidates
+            ],
+            "discovery_errors": discovery_errors,
         }
 
-        budget_state.setdefault("runs", []).append(
-            {
-                "timestamp": now.isoformat(),
-                "mode": mode,
-                "cost_gbp": round(run_cost, 4),
-                "proposals_created": created,
-                "approved": approved,
-                "deferred": deferred,
-                "awaiting_human_gate": awaiting_human_gate,
-                "dry_run": dry_run,
-            }
+        scores_payload = {
+            "run_id": run_id,
+            "keywords": keywords,
+            "scores": [
+                {
+                    "title": scored_item.candidate.title,
+                    "url": scored_item.candidate.url,
+                    "source": scored_item.candidate.source,
+                    "score": round(scored_item.score, 6),
+                    "relevance": round(scored_item.relevance, 6),
+                    "value": round(scored_item.value, 6),
+                    "urgency": round(scored_item.urgency, 6),
+                    "effort": round(scored_item.effort, 6),
+                    "risk": round(scored_item.risk, 6),
+                    "autonomy_class": scored_item.autonomy_class,
+                }
+                for scored_item in scored
+            ],
+        }
+
+        decisions_payload = {
+            "run_id": run_id,
+            "started_at": to_iso8601(run_started),
+            "mode": mode,
+            "routing": routing,
+            "decisions": decisions,
+        }
+
+        replay_dir = write_replay_bundle(
+            paths=paths,
+            run_id=run_id,
+            inputs_payload=inputs_payload,
+            scores_payload=scores_payload,
+            decisions_payload=decisions_payload,
+            config_digest=config_hash(config),
         )
 
         if not dry_run:
-            atomic_write_json(BUDGET_STATE_PATH, budget_state)
-            update_metrics(run_summary)
-            append_reflect_entry(mode, run_summary)
+            budget_state.setdefault("runs", []).append(
+                {
+                    "timestamp": to_iso8601(run_started),
+                    "mode": mode,
+                    "run_id": run_id,
+                    "cost_gbp": round(run_cost, 4),
+                    "proposals_created": len(proposals_to_write),
+                    "approved": approved,
+                    "deferred": deferred,
+                    "awaiting_human_gate": awaiting_human_gate,
+                }
+            )
+            atomic_write_json(paths.budget_state_path, budget_state)
+
+        run_summary = {
+            "timestamp": to_iso8601(run_started),
+            "run_id": run_id,
+            "mode": mode,
+            "status": "dry_run" if dry_run else "ok",
+            "candidates_discovered": len(candidates),
+            "proposals_created": len(proposals_to_write),
+            "approved": approved,
+            "deferred": deferred,
+            "awaiting_human_gate": awaiting_human_gate,
+            "network_errors": len(discovery_errors),
+            "run_cost_gbp": round(run_cost, 4),
+            "budget_remaining_gbp": round(float(budget_state.get("remaining_gbp", 0.0)), 4),
+            "replay_bundle": str(replay_dir),
+        }
+
+        if discovery_errors:
+            write_engine_log(
+                paths,
+                level="error",
+                event="discovery_error",
+                message="One or more discovery sources failed",
+                extra={"errors": discovery_errors, "run_id": run_id},
+            )
+
+        if not dry_run:
+            metrics_path = update_metrics(paths, run_summary, run_started)
+            append_reflect_entry(paths, mode, run_summary, run_started)
+            run_summary["metrics_path"] = str(metrics_path)
+
+        write_engine_log(
+            paths,
+            level="info",
+            event="run_complete",
+            message=f"Run complete for mode={mode}",
+            extra=run_summary,
+        )
 
         return run_summary
 
 
-def list_recent_proposals(directory: Path, max_age_hours: int = 24) -> List[Tuple[Path, Dict[str, str]]]:
+def inspect_announce_failures(cron_jobs_path: Path) -> List[Dict[str, Any]]:
+    payload = read_json(cron_jobs_path, default={})
+    jobs = payload.get("jobs", []) if isinstance(payload, dict) else []
+    failures: List[Dict[str, Any]] = []
+    for job in jobs:
+        state = job.get("state", {}) if isinstance(job, dict) else {}
+        last_error = str(state.get("lastError", ""))
+        if "announce delivery failed" not in last_error.lower():
+            continue
+        failures.append(
+            {
+                "id": job.get("id"),
+                "name": job.get("name"),
+                "last_error": last_error,
+                "last_run_at_ms": state.get("lastRunAtMs"),
+            }
+        )
+    return failures
+
+
+def count_recent_log_errors(log_path: Path, now: dt.datetime) -> int:
+    if not log_path.exists():
+        return 0
+    threshold = now - dt.timedelta(hours=24)
+    count = 0
+    for line in read_text(log_path).splitlines()[-500:]:
+        if not line.strip():
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if payload.get("level") not in {"error", "critical"}:
+            continue
+        timestamp = parse_datetime(str(payload.get("timestamp", "")))
+        if timestamp >= threshold:
+            count += 1
+    return count
+
+
+def status_report(config: Dict[str, Any], paths: RuntimePaths) -> Dict[str, Any]:
     now = utc_now()
-    out: List[Tuple[Path, Dict[str, str]]] = []
-    for path in sorted(directory.glob("*.md"), reverse=True):
-        text = read_text(path)
-        if not text.startswith("---"):
-            continue
-        end = text.find("\n---", 3)
-        if end < 0:
-            continue
-        frontmatter = text[4:end].strip().splitlines()
-        fields: Dict[str, str] = {}
-        for line in frontmatter:
-            if ":" not in line:
-                continue
-            key, value = line.split(":", 1)
-            fields[key.strip()] = value.strip()
+    ensure_runtime_directories(paths)
 
-        created = parse_iso_or_epoch(fields.get("created_at"))
-        if created is None:
-            created = parse_iso_or_epoch(fields.get("id", ""))
-        if created is not None:
-            age_h = (now - created).total_seconds() / 3600.0
-            if age_h > max_age_hours:
-                continue
-        out.append((path, fields))
-    return out
+    validation_errors, validation_warnings = validate_runtime_config(config)
+    budget_state = load_budget_state(paths, config, now.date())
 
-
-def generate_brief() -> Dict[str, Any]:
-    ensure_runtime_structure(sync_philosophy=False)
-
-    approved = list_recent_proposals(APPROVED_DIR, max_age_hours=24)
-    inbox = list_recent_proposals(INBOX_DIR, max_age_hours=24)
-    deferred = list_recent_proposals(DEFERRED_DIR, max_age_hours=24)
-
-    date_key = utc_now().date().isoformat()
-    brief_path = BRIEFINGS_DIR / f"{date_key}-intention-brief.md"
-
-    lines = [
-        f"# Intention Engine Brief — {date_key}",
-        "",
-        "## Summary",
-        f"- Approved proposals (24h): {len(approved)}",
-        f"- Awaiting human gate (24h): {len(inbox)}",
-        f"- Deferred proposals (24h): {len(deferred)}",
-        "",
-    ]
-
-    if approved:
-        lines.extend(["## Top Approved", ""])
-        for path, fields in approved[:5]:
-            lines.append(f"- **{fields.get('id', path.stem)}** {fields.get('title', path.stem)}")
-            lines.append(f"  - source: {fields.get('source', 'unknown')}")
-            lines.append(f"  - action: {fields.get('recommended_action', 'n/a')}")
-        lines.append("")
-
-    if inbox:
-        lines.extend(["## Needs Human Decision", ""])
-        for path, fields in inbox[:5]:
-            lines.append(f"- **{fields.get('id', path.stem)}** {fields.get('title', path.stem)}")
-            lines.append(f"  - reason: autonomy_class={fields.get('autonomy_class', 'unknown')}")
-        lines.append("")
-
-    lines.extend(
-        [
-            "## Notes",
-            "- Generated by Intention Engine `brief` command.",
-            "- Non-blocking policy retained: background tasks never take conversation priority.",
-            "",
-        ]
-    )
-
-    atomic_write(brief_path, "\n".join(lines))
-    return {
-        "status": "ok",
-        "brief_path": str(brief_path),
-        "approved_count": len(approved),
-        "inbox_count": len(inbox),
-        "deferred_count": len(deferred),
+    queues = {
+        "inbox": len(list(paths.inbox_dir.glob("*.md"))),
+        "approved": len(list(paths.approved_dir.glob("*.md"))),
+        "deferred": len(list(paths.deferred_dir.glob("*.md"))),
+        "rejected": len(list(paths.rejected_dir.glob("*.md"))),
     }
 
+    last_run = None
+    if budget_state.get("runs"):
+        last_run = budget_state["runs"][-1]
 
-def status() -> Dict[str, Any]:
-    ensure_runtime_structure(sync_philosophy=False)
-    budget_state = load_budget_state(load_config(CONFIG_PATH))
-    return {
-        "status": "ok",
-        "budget": budget_state,
-        "queue": {
-            "inbox": len(list(INBOX_DIR.glob("*.md"))),
-            "approved": len(list(APPROVED_DIR.glob("*.md"))),
-            "deferred": len(list(DEFERRED_DIR.glob("*.md"))),
-            "rejected": len(list(REJECTED_DIR.glob("*.md"))),
+    announce_failures = inspect_announce_failures(paths.cron_jobs_path)
+    recent_error_count = count_recent_log_errors(paths.logs_path, now)
+
+    health_status = "ok"
+    if validation_errors or announce_failures or recent_error_count > 0:
+        health_status = "degraded"
+
+    result = {
+        "status": health_status,
+        "timestamp": to_iso8601(now),
+        "budget": {
+            "date": budget_state.get("date"),
+            "daily_budget_gbp": budget_state.get("daily_budget_gbp"),
+            "reserve_budget_gbp": budget_state.get("reserve_budget_gbp"),
+            "used_gbp": budget_state.get("used_gbp"),
+            "remaining_gbp": budget_state.get("remaining_gbp"),
         },
-        "last_human_activity": read_json(LAST_HUMAN_ACTIVITY_PATH, default={}),
+        "queues": queues,
+        "last_run": last_run,
+        "health": {
+            "config_valid": len(validation_errors) == 0,
+            "validation_errors": validation_errors,
+            "validation_warnings": validation_warnings,
+            "announce_failures": announce_failures,
+            "recent_log_errors_24h": recent_error_count,
+        },
     }
+
+    if announce_failures:
+        write_engine_log(
+            paths,
+            level="warning",
+            event="announce_delivery_failure",
+            message="One or more orchestrated cron jobs report announce delivery failures",
+            extra={"count": len(announce_failures), "jobs": announce_failures},
+        )
+
+    return result
+
+
+def validate_runtime(config: Dict[str, Any], config_path: Path, paths: RuntimePaths) -> Dict[str, Any]:
+    errors, warnings = validate_runtime_config(config)
+    schema = read_json(DEFAULT_SCHEMA_PATH, default={})
+    schema_available = bool(schema)
+
+    path_checks = {
+        "intent_path_exists": paths.intent_path.exists(),
+        "philosophy_path_exists": paths.philosophy_path.exists() or paths.philosophy_fallback_path.exists(),
+        "proposals_dir_exists": paths.proposals_dir.exists(),
+    }
+
+    for key, exists in path_checks.items():
+        if not exists:
+            warnings.append(f"{key} is false")
+
+    return {
+        "status": "ok" if not errors else "error",
+        "config_path": str(config_path),
+        "schema_path": str(DEFAULT_SCHEMA_PATH),
+        "schema_loaded": schema_available,
+        "errors": errors,
+        "warnings": warnings,
+        "paths": {
+            "intent_path": str(paths.intent_path),
+            "reflect_path": str(paths.reflect_path),
+            "proposals_dir": str(paths.proposals_dir),
+            "budget_state_path": str(paths.budget_state_path),
+            "replay_dir": str(paths.replay_dir),
+            "logs_path": str(paths.logs_path),
+        },
+    }
+
+
+def replay_run(run_id: str, paths: RuntimePaths) -> Dict[str, Any]:
+    replay_dir = paths.replay_dir / run_id
+    decisions = read_json(replay_dir / "decisions.json", default={})
+    scores = read_json(replay_dir / "scores.json", default={})
+    inputs = read_json(replay_dir / "inputs.json", default={})
+
+    if not decisions:
+        return {
+            "status": "error",
+            "message": f"Replay bundle missing: {replay_dir}",
+            "run_id": run_id,
+        }
+
+    routing = decisions.get("routing", {})
+    mismatches: List[Dict[str, Any]] = []
+
+    for item in decisions.get("decisions", []):
+        expected = item.get("route")
+        actual = route_from_values(
+            score=float(item.get("score", 0.0)),
+            relevance=float(item.get("relevance", 0.0)),
+            autonomy_class=str(item.get("autonomy_class", "")),
+            routing=routing,
+        )
+        if actual != expected:
+            mismatches.append(
+                {
+                    "proposal_id": item.get("proposal_id"),
+                    "title": item.get("title"),
+                    "expected": expected,
+                    "actual": actual,
+                }
+            )
+
+    return {
+        "status": "ok" if not mismatches else "error",
+        "run_id": run_id,
+        "bundle": str(replay_dir),
+        "decision_count": len(decisions.get("decisions", [])),
+        "mismatches": mismatches,
+        "inputs_present": bool(inputs),
+        "scores_present": bool(scores),
+    }
+
+
+def render_validate_text(payload: Dict[str, Any]) -> str:
+    lines = [f"status: {payload['status']}", f"config: {payload['config_path']}"]
+    if payload.get("errors"):
+        lines.append("errors:")
+        for entry in payload["errors"]:
+            lines.append(f"- {entry}")
+    if payload.get("warnings"):
+        lines.append("warnings:")
+        for entry in payload["warnings"]:
+            lines.append(f"- {entry}")
+    return "\n".join(lines)
+
+
+def render_status_text(payload: Dict[str, Any]) -> str:
+    health = payload.get("health", {})
+    budget = payload.get("budget", {})
+    queues = payload.get("queues", {})
+    lines = [
+        f"status: {payload.get('status')}",
+        f"budget remaining: GBP {budget.get('remaining_gbp', 0):.2f}",
+        f"queues: inbox={queues.get('inbox', 0)} approved={queues.get('approved', 0)} deferred={queues.get('deferred', 0)} rejected={queues.get('rejected', 0)}",
+    ]
+    if health.get("announce_failures"):
+        lines.append(f"announce failures: {len(health['announce_failures'])}")
+    return "\n".join(lines)
+
+
+def normalize_legacy_argv(argv: Sequence[str]) -> List[str]:
+    args = list(argv)
+    if not args:
+        return ["run", "--mode", "micro"]
+
+    if any(token in COMMANDS for token in args):
+        return args
+
+    if args == ["-h"] or args == ["--help"]:
+        return args
+
+    prefix: List[str] = []
+    index = 0
+    while index < len(args):
+        token = args[index]
+        if token == "--config" and index + 1 < len(args):
+            prefix.extend([token, args[index + 1]])
+            index += 2
+            continue
+        if token.startswith("--config="):
+            prefix.append(token)
+            index += 1
+            continue
+        if token in {"-h", "--help"}:
+            return args
+        break
+
+    return prefix + ["run"] + args[index:]
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(description="Intention Engine runtime")
-    sub = p.add_subparsers(dest="command", required=True)
+    parser = argparse.ArgumentParser(description="Intention Engine runtime")
+    parser.add_argument(
+        "--config",
+        default=os.environ.get("INTENTION_ENGINE_CONFIG", str(DEFAULT_CONFIG_PATH)),
+        help="Path to runtime config JSON",
+    )
 
-    init_p = sub.add_parser("init", help="Initialize runtime directories and templates")
-    init_p.add_argument("--sync-philosophy", action="store_true", help="Force-copy philosophy to memory/PHILOSOPHY.md")
+    subparsers = parser.add_subparsers(dest="command", required=True)
 
-    run_p = sub.add_parser("run", help="Run autonomous scout+route loop")
-    run_p.add_argument("--mode", choices=["micro", "deep"], default="micro")
-    run_p.add_argument("--force", action="store_true", help="Ignore idle gate for micro runs")
-    run_p.add_argument("--dry-run", action="store_true", help="Do not write files")
+    run_parser = subparsers.add_parser("run", help="Execute an engine run")
+    run_parser.add_argument("--mode", choices=["micro", "deep", "research_deep"], required=True)
+    run_parser.add_argument("--dry-run", action="store_true", help="Do not mutate budget/proposals/metrics")
 
-    sub.add_parser("brief", help="Generate daily Intention Engine brief")
-    sub.add_parser("status", help="Show runtime status")
+    status_parser = subparsers.add_parser("status", help="Show runtime status")
+    status_parser.add_argument("--json", action="store_true", help="Emit JSON output")
 
-    return p
+    validate_parser = subparsers.add_parser("validate", help="Validate config and paths")
+    validate_parser.add_argument("--json", action="store_true", help="Emit JSON output")
+
+    replay_parser = subparsers.add_parser("replay", help="Replay a previous run bundle")
+    replay_parser.add_argument("--run-id", required=True, help="Run ID to replay")
+
+    return parser
 
 
-def main() -> int:
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    normalized_argv = normalize_legacy_argv(argv if argv is not None else sys.argv[1:])
     parser = build_parser()
-    args = parser.parse_args()
+    args = parser.parse_args(normalized_argv)
 
-    if args.command == "init":
-        result = ensure_runtime_structure(sync_philosophy=args.sync_philosophy)
-    elif args.command == "run":
-        result = run_engine(mode=args.mode, force=args.force, dry_run=args.dry_run)
-    elif args.command == "brief":
-        result = generate_brief()
-    elif args.command == "status":
-        result = status()
-    else:
-        parser.error("Unknown command")
+    config_path = resolve_config_path(str(args.config), DEFAULT_CONFIG_PATH, cwd=Path.cwd())
+    config, load_errors = load_runtime_config(config_path)
+
+    if load_errors:
+        payload = {"status": "error", "errors": load_errors}
+        print(json.dumps(payload, indent=2))
+        return 1
+
+    paths = resolve_runtime_paths(config, WORKSPACE_ROOT, PROJECT_ROOT)
+
+    try:
+        if args.command == "run":
+            result = run_engine(args.mode, config, paths, dry_run=bool(args.dry_run))
+            print(json.dumps(result, indent=2))
+            return 0 if result.get("status") in {"ok", "dry_run"} else 1
+
+        if args.command == "status":
+            result = status_report(config, paths)
+            if args.json:
+                print(json.dumps(result, indent=2))
+            else:
+                print(render_status_text(result))
+            return 0
+
+        if args.command == "validate":
+            result = validate_runtime(config, config_path, paths)
+            if args.json:
+                print(json.dumps(result, indent=2))
+            else:
+                print(render_validate_text(result))
+            return 0 if result.get("status") == "ok" else 1
+
+        if args.command == "replay":
+            result = replay_run(args.run_id, paths)
+            print(json.dumps(result, indent=2))
+            return 0 if result.get("status") == "ok" else 1
+
+        parser.error(f"Unknown command: {args.command}")
         return 2
-
-    print(json.dumps(result, indent=2, sort_keys=True))
-    return 0
+    except Exception as exc:  # pragma: no cover - defensive boundary
+        try:
+            write_engine_log(
+                paths,
+                level="critical",
+                event="unhandled_exception",
+                message="Unhandled exception in intention engine runtime",
+                extra={"error": str(exc), "command": args.command},
+            )
+        except Exception:
+            pass
+        print(json.dumps({"status": "error", "error": str(exc)}))
+        return 1
 
 
 if __name__ == "__main__":

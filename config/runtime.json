@@ -1,65 +1,117 @@
 {
-  "timezone": "Europe/London",
   "daily_budget_gbp": 2.0,
   "reserve_budget_gbp": 0.2,
-  "mode_costs_gbp": {
-    "micro": 0.05,
-    "deep": 0.4
+  "mode_profiles": {
+    "micro": {
+      "enabled": true,
+      "max_items": 2,
+      "max_run_cost": 0.05,
+      "validation": "smoke",
+      "delegation": false,
+      "checkpointing": false
+    },
+    "deep": {
+      "enabled": true,
+      "max_items": 5,
+      "max_run_cost": 0.2,
+      "validation": "smoke",
+      "delegation": true,
+      "checkpointing": false
+    },
+    "research_deep": {
+      "enabled": false,
+      "max_items": 8,
+      "max_run_cost": 0.4,
+      "validation": "full",
+      "delegation": true,
+      "checkpointing": true
+    }
+  },
+  "paths": {
+    "intent_path": "memory/INTENT.md",
+    "reflect_path": "memory/REFLECT.md",
+    "philosophy_path": "memory/PHILOSOPHY.md",
+    "philosophy_fallback_path": "philosophy/PHILOSOPHY.md",
+    "proposals_dir": "memory/proposals",
+    "briefings_dir": "memory/briefings",
+    "metrics_dir": "memory/metrics",
+    "budget_state_path": "data/intention-engine-budget.json",
+    "lock_path": "memory/metrics/intention-engine.lock",
+    "logs_path": "logs/engine.jsonl",
+    "replay_dir": "data/intention-engine-runs",
+    "cron_jobs_path": "~/.openclaw/cron/jobs.json"
   },
   "idle_threshold_minutes": 5,
-  "max_parallel_workers": 3,
-  "routing": {
-    "auto_safe_threshold": 0.75,
-    "policy_guarded_threshold": 0.7,
-    "allow_policy_guarded_auto": true,
-    "defer_threshold": 0.45,
-    "min_relevance_threshold": 0.08
-  },
-  "intake": {
-    "micro_max_items": 2,
-    "deep_max_items": 5,
-    "auto_insert_intentions": true,
-    "default_saga_id": "S02",
-    "default_chapter_id": "C06",
-    "default_intent_status": "NEXT"
-  },
   "sources": [
     {
-      "name": "reddit_localllama",
-      "type": "reddit",
-      "subreddit": "LocalLLaMA",
-      "limit": 10
-    },
-    {
-      "name": "reddit_machinelearning",
-      "type": "reddit",
-      "subreddit": "MachineLearning",
-      "limit": 10
-    },
-    {
-      "name": "hackernews",
       "type": "hackernews",
+      "name": "Hacker News",
       "limit": 20
     },
     {
-      "name": "github_agents",
+      "type": "reddit",
+      "subreddit": "LocalLLaMA",
+      "name": "LocalLLaMA",
+      "limit": 10
+    },
+    {
+      "type": "reddit",
+      "subreddit": "MachineLearning",
+      "name": "MachineLearning",
+      "limit": 10
+    },
+    {
       "type": "github",
-      "query": "agentic AI framework",
+      "query": "agentic ai LLM",
+      "name": "GitHub Agentic AI",
       "limit": 10
     }
   ],
+  "routing": {
+    "auto_safe_threshold": 0.75,
+    "policy_guarded_threshold": 0.7,
+    "defer_threshold": 0.45,
+    "min_relevance_threshold": 0.08,
+    "allow_policy_guarded_auto": false,
+    "guarded_keywords": [
+      "integrate",
+      "migration",
+      "migrate",
+      "replace",
+      "security",
+      "credential",
+      "oauth",
+      "auth"
+    ],
+    "always_human_gate_keywords": [
+      "password",
+      "secret",
+      "token",
+      "api key",
+      "production",
+      "deploy",
+      "delete",
+      "payment",
+      "invoice",
+      "email",
+      "dm",
+      "post",
+      "publish"
+    ]
+  },
+  "intake": {
+    "default_saga_id": "S02",
+    "default_chapter_id": "C06",
+    "default_intent_status": "NEXT",
+    "auto_insert_intentions": false
+  },
   "external_action_keywords": [
-    "deploy",
-    "publish",
+    "send",
     "post",
     "tweet",
     "email",
-    "buy",
-    "purchase",
-    "payment",
-    "install",
-    "delete",
-    "prod",
-    "production"
+    "publish",
+    "deploy",
+    "release"
   ]
 }

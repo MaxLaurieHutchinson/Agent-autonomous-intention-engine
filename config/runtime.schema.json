@@ -1,0 +1,187 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Intention Engine Runtime Config",
+  "type": "object",
+  "required": [
+    "daily_budget_gbp",
+    "reserve_budget_gbp",
+    "mode_profiles",
+    "paths",
+    "sources",
+    "routing"
+  ],
+  "properties": {
+    "daily_budget_gbp": {
+      "type": "number",
+      "minimum": 0
+    },
+    "reserve_budget_gbp": {
+      "type": "number",
+      "minimum": 0
+    },
+    "mode_profiles": {
+      "type": "object",
+      "required": [
+        "micro",
+        "deep",
+        "research_deep"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "micro": {
+          "$ref": "#/$defs/modeProfile"
+        },
+        "deep": {
+          "$ref": "#/$defs/modeProfile"
+        },
+        "research_deep": {
+          "$ref": "#/$defs/modeProfile"
+        }
+      }
+    },
+    "paths": {
+      "type": "object",
+      "required": [
+        "intent_path",
+        "reflect_path",
+        "proposals_dir",
+        "metrics_dir",
+        "budget_state_path",
+        "lock_path",
+        "logs_path",
+        "replay_dir"
+      ],
+      "properties": {
+        "intent_path": {
+          "type": "string"
+        },
+        "reflect_path": {
+          "type": "string"
+        },
+        "philosophy_path": {
+          "type": "string"
+        },
+        "philosophy_fallback_path": {
+          "type": "string"
+        },
+        "proposals_dir": {
+          "type": "string"
+        },
+        "briefings_dir": {
+          "type": "string"
+        },
+        "metrics_dir": {
+          "type": "string"
+        },
+        "budget_state_path": {
+          "type": "string"
+        },
+        "lock_path": {
+          "type": "string"
+        },
+        "logs_path": {
+          "type": "string"
+        },
+        "replay_dir": {
+          "type": "string"
+        },
+        "cron_jobs_path": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": true
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    },
+    "routing": {
+      "type": "object",
+      "required": [
+        "auto_safe_threshold",
+        "policy_guarded_threshold",
+        "defer_threshold",
+        "min_relevance_threshold",
+        "allow_policy_guarded_auto",
+        "guarded_keywords",
+        "always_human_gate_keywords"
+      ],
+      "properties": {
+        "auto_safe_threshold": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 2
+        },
+        "policy_guarded_threshold": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 2
+        },
+        "defer_threshold": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 2
+        },
+        "min_relevance_threshold": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "allow_policy_guarded_auto": {
+          "type": "boolean"
+        },
+        "guarded_keywords": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "always_human_gate_keywords": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "$defs": {
+    "modeProfile": {
+      "type": "object",
+      "required": [
+        "enabled",
+        "max_items",
+        "max_run_cost",
+        "validation",
+        "delegation"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "max_items": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_run_cost": {
+          "type": "number",
+          "minimum": 0
+        },
+        "validation": {
+          "type": "string"
+        },
+        "delegation": {
+          "type": "boolean"
+        },
+        "checkpointing": {
+          "type": "boolean"
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}
