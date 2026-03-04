@@ -53,10 +53,6 @@ LOW_SIGNAL_TITLE_TERMS = {
     "politics",
 }
 
-LEGACY_GLOBAL_FLAGS = {"--config", "-h", "--help"}
-COMMANDS = {"run", "status", "validate", "replay"}
-
-
 @dataclasses.dataclass
 class Candidate:
     source: str
@@ -1135,36 +1131,6 @@ def render_status_text(payload: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def normalize_legacy_argv(argv: Sequence[str]) -> List[str]:
-    args = list(argv)
-    if not args:
-        return ["run", "--mode", "micro"]
-
-    if any(token in COMMANDS for token in args):
-        return args
-
-    if args == ["-h"] or args == ["--help"]:
-        return args
-
-    prefix: List[str] = []
-    index = 0
-    while index < len(args):
-        token = args[index]
-        if token == "--config" and index + 1 < len(args):
-            prefix.extend([token, args[index + 1]])
-            index += 2
-            continue
-        if token.startswith("--config="):
-            prefix.append(token)
-            index += 1
-            continue
-        if token in {"-h", "--help"}:
-            return args
-        break
-
-    return prefix + ["run"] + args[index:]
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Intention Engine runtime")
     parser.add_argument(
@@ -1192,9 +1158,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: Optional[Sequence[str]] = None) -> int:
-    normalized_argv = normalize_legacy_argv(argv if argv is not None else sys.argv[1:])
     parser = build_parser()
-    args = parser.parse_args(normalized_argv)
+    args = parser.parse_args(argv if argv is not None else sys.argv[1:])
 
     config_path = resolve_config_path(str(args.config), DEFAULT_CONFIG_PATH, cwd=Path.cwd())
     config, load_errors = load_runtime_config(config_path)
