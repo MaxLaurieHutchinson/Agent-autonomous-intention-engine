@@ -3,12 +3,11 @@
 ## Delivered in DEV
 
 ### Runtime Engine
-- `scripts/intention_engine.py`
+- `python3 -m intention_engine_core.cli`
   - `run --mode micro|deep|research_deep [--dry-run]`
   - `status [--json]`
   - `validate [--json]`
   - `replay --run-id <id>`
-  - legacy `--mode` shim retained
 
 ### Config and Path Contract
 - `config/runtime.json`

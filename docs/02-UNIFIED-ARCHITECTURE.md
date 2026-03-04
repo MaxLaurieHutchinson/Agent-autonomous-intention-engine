@@ -15,8 +15,9 @@ Status Layer  -> budget + queues + health + announce-failure visibility
 ```
 
 ## Core Runtime Files
-- `scripts/intention_engine.py`
-- `scripts/path_resolver.py`
+- `src/intention_engine_core/runtime.py`
+- `src/intention_engine_core/path_resolver.py`
+- `src/intention_engine_core/cli.py`
 - `config/runtime.json`
 - `config/runtime.schema.json`
 

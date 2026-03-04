@@ -1,9 +1,18 @@
 # Changelog
 
+## v2.1.1 - 2026-03-04 (dev)
+- Removed backward-compatibility command surfaces from `dev`:
+  - deleted `scripts/intention_engine.py` and `scripts/path_resolver.py`
+  - deleted `ops/init.sh`, `ops/brief.sh`, `ops/micro.sh`, `ops/deep.sh`
+- Enforced strict subcommand CLI parsing (`run`, `status`, `validate`, `replay`) with no legacy top-level `--mode` shim.
+- Updated cron installer to canonical wrappers only:
+  - `ops/ie_micro.sh`, `ops/ie_deep.sh`, `ops/ie_status.sh`
+- Updated tests and CI to use `python -m intention_engine_core.cli` and `ops/ie_*` wrappers only.
+- Updated docs to reflect the clean `src` + `docs` runtime contract.
+
 ## v2.1.0 - 2026-03-03
-- Reworked runtime CLI to subcommands with compatibility shim:
+- Reworked runtime CLI to subcommands:
   - `run`, `status`, `validate`, `replay`
-  - legacy `--mode` invocation still supported
 - Added config-driven mode registry:
   - `micro` enabled
   - `deep` enabled

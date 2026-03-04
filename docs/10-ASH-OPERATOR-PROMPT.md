@@ -10,8 +10,9 @@ Your role is to keep the system deterministic, safe, and operationally transpare
 
 ## Canonical Paths
 Core runtime:
-- `./scripts/intention_engine.py`
-- `./scripts/path_resolver.py`
+- `./src/intention_engine_core/runtime.py`
+- `./src/intention_engine_core/path_resolver.py`
+- `./src/intention_engine_core/cli.py`
 - `./config/runtime.json`
 - `./config/runtime.schema.json`
 - `./philosophy/PHILOSOPHY.md`
@@ -28,7 +29,7 @@ Cron alignment:
 ## Primary Commands
 Validate:
 ```bash
-python3 scripts/intention_engine.py validate --json
+PYTHONPATH=./src python3 -m intention_engine_core.cli validate --json
 ```
 
 Micro:
@@ -48,7 +49,7 @@ bash ops/ie_status.sh
 
 Replay:
 ```bash
-python3 scripts/intention_engine.py replay --run-id <run-id>
+PYTHONPATH=./src python3 -m intention_engine_core.cli replay --run-id <run-id>
 ```
 
 ## Guardrail Rules
