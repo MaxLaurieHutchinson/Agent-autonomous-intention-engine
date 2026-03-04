@@ -1,66 +1,49 @@
-# Implementation Status (v0.3)
+# Implementation Status (v2.1)
 
-## What Is Now Built
+## Delivered in DEV
 
 ### Runtime Engine
 - `scripts/intention_engine.py`
-  - `init`: creates runtime state and templates
-  - `run --mode micro|deep`: discovery, scoring, routing, auto-intent insertion
-  - `brief`: generates daily briefing markdown
-  - `status`: shows budget, queues, last activity
+  - `run --mode micro|deep|research_deep [--dry-run]`
+  - `status [--json]`
+  - `validate [--json]`
+  - `replay --run-id <id>`
+  - legacy `--mode` shim retained
 
-### Runtime Config
+### Config and Path Contract
 - `config/runtime.json`
-  - budget policy
-  - source configuration
-  - routing thresholds and relevance gate
-  - intake behavior
+  - mode profiles + safe routing defaults
+  - config-driven paths (no hardcoded machine path)
+- `config/runtime.schema.json`
+  - schema-backed config checks
 
-### Cron-Ready Wrappers
-- `ops/init.sh`
-- `ops/micro.sh`
-- `ops/deep.sh`
-- `ops/brief.sh`
-- `ops/install-cron.sh`
+### Determinism and Operability
+- replay bundles per run in `data/intention-engine-runs/<run-id>/`
+- structured logs in `logs/engine.jsonl`
+- status health includes announce-delivery failures
 
-### Scheduler State
-- OS cron autoschedule installed with managed block markers:
-  - `*/30 * * * *` micro loop
-  - `30 23 * * *` deep loop
-  - `55 6 * * *` briefing loop
+### Operational Surfaces
+- wrappers:
+  - `ops/ie_micro.sh`
+  - `ops/ie_deep.sh`
+  - `ops/ie_status.sh`
+- cron alignment:
+  - `cron/templates/intention-engine-orchestrator-v2.md`
+  - `agents/cron/reconcile-intention-engine-jobs.sh`
 
-### Runtime State (created and active)
-- `memory/PHILOSOPHY.md`
-- `memory/REFLECT.md`
-- `memory/proposals/{inbox,approved,deferred,rejected}/`
-- `memory/briefings/`
-- `memory/metrics/`
-- `memory/policies/fallbacks.md`
-- `memory/templates/proposal-skill-evolution.md`
-- `memory/templates/reflection-multi-role.md`
-- `data/intention-engine-budget.json`
+### Quality Gates
+- tests:
+  - `tests/test_path_resolution.py`
+  - `tests/test_routing_and_guardrails.py`
+  - `tests/test_cli_integration.py`
+- CI workflow in `.github/workflows/ci.yml`
 
-## Safety and Non-Blocking Behavior
-- Micro loop is idle-gated from `data/last-human-activity.json`.
-- Lock file prevents concurrent write collisions: `memory/metrics/intention-engine.lock`.
-- No external/public actions are executed by the runtime.
-- Human-gated proposals remain in inbox.
+## Open / Deferred
+- `research_deep` orchestration remains intentionally deferred (`enabled=false`).
+- multi-agent academic long-loop execution not implemented in this phase.
 
-## Validation Performed
-- `python3 scripts/intention_engine.py init`
-- `python3 scripts/intention_engine.py status`
-- `python3 scripts/intention_engine.py run --mode micro`
-- `python3 scripts/intention_engine.py run --mode micro --dry-run`
-- `python3 scripts/intention_engine.py brief`
-- `python3 -m py_compile scripts/intention_engine.py`
-- wrapper scripts (`ops/*.sh`) executed
-
-## Known Constraints
-- Reddit source currently returns HTTP 403 in this environment; runtime continues with Hacker News + GitHub sources.
-- Existing approved/deferred history from test runs remains in `memory/proposals/`.
-- Auto-inserted intentions are currently appended to `INTENT.md` under `Autonomous Intake (Generated)`.
-
-## Next Hardening Steps
-1. Add source adapters for additional trend feeds if Reddit stays blocked.
-2. Add optional cooldown window to avoid frequent near-duplicate topics.
-3. Add proposal execution worker for approved items (currently intake + planning only).
+## Exit Criteria for Merge
+- all tests pass locally and in CI
+- `validate --json` status `ok`
+- wrappers execute from repo root
+- no generated runtime artifacts committed

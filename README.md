@@ -1,52 +1,68 @@
 # Intention Engine Unified
 
-Single project to unify DayDream, Ash Time, Intention philosophy, and The Intention Engine into one autonomous operating system.
+Single deployable Intention Engine with deterministic runtime, safe guardrails, and operational wrappers for heartbeat/cron alignment.
 
 ## Mission
-Build a proactive agent system that:
-- Learns continuously
-- Creates useful outputs without waiting for prompts
-- Scans trends and surfaces what is up-and-coming
-- Converts discoveries into narrative-aligned execution
+Build one autonomous system that:
+- discovers useful work continuously
+- routes decisions safely (`auto_safe`, `policy_guarded`, `human_gate`)
+- keeps human-readable memory first (Markdown files)
+- remains replayable and debuggable by design
 
-## Constitution
-Source of truth for "why":
+## Constitutional Source
 - `philosophy/PHILOSOPHY.md`
 
-This document is the constitutional layer. All planning, proposals, and automation are filtered through it.
+This philosophy file is the decision filter for discovery, routing, and execution.
 
-## Unified Name
-Use one name everywhere:
+## Canonical Runtime Name
 - `Intention Engine` (canonical)
 
-Retire competing labels as product names (`DayDream`, `Ash Time`) and keep them as internal module names only.
+Legacy names (`DayDream`, `Ash Time`) remain historical references, not product names.
+
+## v2.1 Runtime Contract
+CLI:
+- `python3 scripts/intention_engine.py run --mode <micro|deep|research_deep> [--dry-run]`
+- `python3 scripts/intention_engine.py status --json`
+- `python3 scripts/intention_engine.py validate --json`
+- `python3 scripts/intention_engine.py replay --run-id <id>`
+
+Legacy compatibility:
+- `python3 scripts/intention_engine.py --mode micro`
+
+Wrappers:
+- `bash ops/ie_micro.sh`
+- `bash ops/ie_deep.sh`
+- `bash ops/ie_status.sh`
 
 ## What This Pack Contains
-- `01-PROJECT-AUDIT.md` - What each existing project contributes
-- `02-UNIFIED-ARCHITECTURE.md` - End-to-end system design
-- `03-AUTONOMY-OPERATING-MODEL.md` - Fully autonomous and proactive runtime model
-- `04-MIGRATION-PLAN.md` - Step-by-step consolidation plan
-- `05-IMPLEMENTATION-BACKLOG.md` - Immediate executable backlog in saga format
-- `06-ASH-TIME-V3-NORMALIZATION.md` - Normalize and preserve best parts of current Ash Time v3 prompt
-- `07-CLAW-TIME-V04-IDEA-TRIAGE.md` - Keep/simplify/drop review of CLAW TIME v0.4 concepts
-- `08-BUILD-RUNBOOK.md` - Commands and scheduling to run the system in full-auto mode
-- `09-IMPLEMENTATION-STATUS.md` - Runtime build status, validation, and known constraints
-- `CHANGELOG.md` - Version history
-- `10-ASH-OPERATOR-PROMPT.md` - Ready-to-use Ash operator prompt for learning and running Intention Engine
+- `01-PROJECT-AUDIT.md` - retained value + consolidation decisions
+- `02-UNIFIED-ARCHITECTURE.md` - end-to-end v2.1 architecture
+- `03-AUTONOMY-OPERATING-MODEL.md` - safety model + policy defaults
+- `04-MIGRATION-PLAN.md` - main -> dev migration plan
+- `05-IMPLEMENTATION-BACKLOG.md` - backlog by saga/chapter
+- `06-ASH-TIME-V3-NORMALIZATION.md` - what was retained/simplified
+- `07-CLAW-TIME-V04-IDEA-TRIAGE.md` - idea triage decisions
+- `08-BUILD-RUNBOOK.md` - build/run/reconcile operations
+- `09-IMPLEMENTATION-STATUS.md` - shipped scope and gaps
+- `10-ASH-OPERATOR-PROMPT.md` - operator prompt for autonomous runs
 
-## Design Principles
-- Narrative first: every task must tie to a saga/chapter
-- OODA always: Observe, Orient, Decide, Act as the core loop
-- Files over frameworks: markdown + deterministic automations
-- Autonomy by policy: no per-action micromanagement for safe classes
-- Evidence over claims: outputs must be traceable and verifiable
+## Quick Start
+1. Validate config:
+   - `python3 scripts/intention_engine.py validate --json`
+2. Dry-run micro loop:
+   - `bash ops/ie_micro.sh --dry-run`
+3. Status check:
+   - `bash ops/ie_status.sh`
+4. Run tests:
+   - `python3 -m unittest discover -s tests -v`
 
-## Target State
-One coherent loop:
-1. Scout discovers trends
-2. OODA filter aligns discoveries to philosophy + active sagas
-3. Engine auto-converts high-signal items into intentions
-4. Workers execute proactively
-5. Reflector captures outcomes and updates knowledge
+## Runtime Artifacts
+- replay bundles: `data/intention-engine-runs/<run-id>/`
+- logs: `logs/engine.jsonl`
+- budget state: `data/intention-engine-budget.json`
+- proposal queues: `memory/proposals/{inbox,approved,deferred,rejected}`
 
-Status: standalone repo package v1.0 (2026-02-22)
+## Safe Defaults
+- `allow_policy_guarded_auto=false`
+- `research_deep` profile present but disabled
+- path contract fully config-driven (no machine-specific hardcoded paths)

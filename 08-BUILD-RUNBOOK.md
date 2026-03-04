@@ -1,78 +1,58 @@
-# Build Runbook (Full Auto)
+# Build Runbook (v2.1)
+
+## Prerequisites
+- Python 3.9+
+- repo root as current working directory
+
+## Core Validation
+```bash
+python3 scripts/intention_engine.py validate --json
+python3 -m unittest discover -s tests -v
+```
 
 ## Runtime Commands
-
-Initialize runtime state:
+Micro run:
 ```bash
-./ops/init.sh
+bash ops/ie_micro.sh
 ```
 
-Run micro autonomous loop (idle-gated, non-blocking):
+Deep run:
 ```bash
-./ops/micro.sh
+bash ops/ie_deep.sh
 ```
 
-Run deep autonomous loop:
+Status JSON:
 ```bash
-./ops/deep.sh
+bash ops/ie_status.sh
 ```
 
-Generate daily brief:
+Replay:
 ```bash
-./ops/brief.sh
+python3 scripts/intention_engine.py replay --run-id <run-id>
 ```
 
-Install/update full-auto cron schedule (idempotent):
+## Legacy Compatibility Command
 ```bash
-./ops/install-cron.sh
+python3 scripts/intention_engine.py --mode micro --dry-run
 ```
 
-Check status and queues:
+## Cron / Heartbeat Alignment
+Template used by orchestrated cron runs:
+- `cron/templates/intention-engine-orchestrator-v2.md`
+
+Patch live cron payloads safely:
 ```bash
-python3 ./scripts/intention_engine.py status
+bash agents/cron/reconcile-intention-engine-jobs.sh
 ```
 
-## What Gets Created/Updated
+## Operational Smoke Checklist
+1. `python3 scripts/intention_engine.py validate --json` returns status `ok`.
+2. `bash ops/ie_micro.sh --dry-run` returns `dry_run` and emits replay bundle.
+3. `bash ops/ie_status.sh` returns parseable JSON.
+4. `python3 -m unittest discover -s tests -v` passes.
 
-- `memory/PHILOSOPHY.md`
-- `memory/REFLECT.md`
-- `memory/proposals/inbox/*.md`
-- `memory/proposals/approved/*.md`
-- `memory/proposals/deferred/*.md`
-- `memory/metrics/intention-engine-YYYY-MM-DD.json`
-- `memory/briefings/YYYY-MM-DD-intention-brief.md`
-- `memory/INTENT.md` (auto-intake insertions)
-- `data/intention-engine-budget.json`
-
-## Full-Auto Schedule (suggested)
-
-Use your scheduler of choice with these cadences:
-- every 30 minutes: micro loop
-- 23:30 daily: deep loop
-- 06:55 daily: briefing
-
-### Example crontab entries
-```cron
-*/30 * * * * /path/to/Agent-autonomous-intention-engine/ops/micro.sh >> /tmp/intention-engine-micro.log 2>&1
-30 23 * * * /path/to/Agent-autonomous-intention-engine/ops/deep.sh >> /tmp/intention-engine-deep.log 2>&1
-55 6 * * * /path/to/Agent-autonomous-intention-engine/ops/brief.sh >> /tmp/intention-engine-brief.log 2>&1
-```
-
-`intention-engine-install-cron.sh` manages this block automatically.
-
-## Non-Blocking Guarantee
-
-- Micro loop is idle-gated by `data/last-human-activity.json`.
-- Without `--force`, micro runs skip when human activity is recent.
-- All writes are lock-protected (`memory/metrics/intention-engine.lock`).
-- Runs are short and checkpointed by design.
-
-## Safety/Routing Summary
-
-Proposal routing:
-- `auto_safe` + high score -> auto-approve
-- `policy_guarded` + threshold -> auto-approve (if policy allows)
-- `human_gate` -> remains in inbox for decision
-- low score -> deferred
-
-No external actions are executed by this runtime. It only creates/updates local state files.
+## Failure Handling
+If run fails:
+1. check `logs/engine.jsonl`
+2. inspect latest replay bundle in `data/intention-engine-runs/`
+3. run `status --json` to inspect health degradation and queue state

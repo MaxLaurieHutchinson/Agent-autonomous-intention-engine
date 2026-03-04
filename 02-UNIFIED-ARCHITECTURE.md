@@ -1,100 +1,45 @@
-# Unified Architecture
+# Unified Architecture (v2.1)
 
 ## System Overview
 
 ```text
-                  PHILOSOPHY (Constitution)
-                            |
-                            v
-Scout Runtime -> OODA Filter -> Proposal Router -> Saga Planner -> Worker Runtime
-      |              |                |                 |               |
-      |              v                v                 v               v
-Trend Sources    Alignment Score   Queue/Auto      INTENT.md      Artifacts/Outputs
-(Reddit/HN/etc)  + Risk Class      Decision        (Sagas)        (docs/code/reports)
-      |                                                                   |
-      +-----------------------> Reflector + Evidence Engine <-------------+
-                                      |
-                                      v
-                               REFLECT.md + knowledge/
+Sources -> Discover -> Score -> Classify Risk -> Route -> Persist Proposals
+            |          |             |             |
+            |          |             |             +--> approved/inbox/deferred/rejected
+            |          |             +--> auto_safe/policy_guarded/human_gate
+            |          +--> config thresholds + relevance
+            +--> mode profile constraints (max_items, max_run_cost)
+
+Run Artifacts -> replay bundle (inputs/scores/decisions/config-hash)
+Status Layer  -> budget + queues + health + announce-failure visibility
 ```
 
-## Canonical Runtime Files
+## Core Runtime Files
+- `scripts/intention_engine.py`
+- `scripts/path_resolver.py`
+- `config/runtime.json`
+- `config/runtime.schema.json`
 
-Use these as active state files:
-- `<WORKSPACE>/memory/PHILOSOPHY.md` (symlink or generated copy from project philosophy)
-- `<WORKSPACE>/memory/INTENT.md`
-- `<WORKSPACE>/memory/REFLECT.md`
-- `<WORKSPACE>/memory/knowledge/`
-- `<WORKSPACE>/memory/proposals/inbox/`
-- `<WORKSPACE>/memory/proposals/approved/`
-- `<WORKSPACE>/memory/proposals/rejected/`
-- `<WORKSPACE>/memory/proposals/deferred/`
-- `<WORKSPACE>/memory/briefings/`
-- `<WORKSPACE>/memory/metrics/`
+## Operational Contracts
+- wrappers: `ops/ie_micro.sh`, `ops/ie_deep.sh`, `ops/ie_status.sh`
+- cron orchestrator template: `cron/templates/intention-engine-orchestrator-v2.md`
+- cron reconciliation helper: `agents/cron/reconcile-intention-engine-jobs.sh`
 
-## Data Contracts
+## Canonical State Files
+- `memory/INTENT.md`
+- `memory/REFLECT.md`
+- `memory/PHILOSOPHY.md` (or fallback from `philosophy/PHILOSOPHY.md`)
+- `memory/proposals/{inbox,approved,deferred,rejected}`
+- `data/intention-engine-budget.json`
+- `data/intention-engine-runs/<run-id>/`
+- `logs/engine.jsonl`
 
-### Proposal Contract (`memory/proposals/inbox/*.md` frontmatter)
-```yaml
-id: P-2026-02-21-001
-title: Evaluate MCP workflow for tool orchestration
-source: reddit/r/LocalLLaMA
-created_at: 2026-02-21T23:30:00+00:00
-saga_id: S02
-chapter_id: C05
-alignment:
-  philosophy: 0.90
-  active_intent: 0.85
-impact_score: 0.78
-risk_score: 0.22
-autonomy_class: policy_guarded
-recommended_action: Run 60-minute spike and produce comparison memo
-acceptance_test: Memo includes fit, effort, risk, and migration recommendation
-```
+## Determinism and Replay
+Each run captures a single start timestamp and writes a replay bundle.
+`replay --run-id` recomputes route outcomes from bundle data and asserts deterministic equivalence.
 
-### Intention Contract (`memory/INTENT.md` item)
-Each intention must include:
-- `id`
-- `saga_id` and `chapter_id`
-- `narrative_reason` (why this matters in the story)
-- `status` (`NOW`, `NEXT`, `LATER`, `COMPLETED`, `BLOCKED`)
-- `evidence_target` (what proof will exist when done)
-
-## OODA Pipeline (Deterministic)
-1. Observe
-- Gather raw discoveries from configured sources.
-- Normalize into candidate records.
-
-2. Orient
-- Score each candidate against:
-  - Philosophy alignment
-  - Active saga relevance
-  - Cost/effort/risk
-  - Evidence potential
-- Keep top 2-5 high-signal candidates.
-
-3. Decide
-- Route by autonomy class:
-  - `auto_safe`: auto-approve and schedule immediately
-  - `policy_guarded`: auto-approve if policy allows, else queue
-  - `human_gate`: queue for manual decision
-
-4. Act
-- Approved proposals become intentions under explicit saga/chapter.
-- Worker runtime starts execution based on priority and capacity.
-
-5. Reflect
-- Capture what happened, what worked, what changed.
-- Update tactical knowledge files when pattern quality is high.
-
-## Narrative Enforcement Rules
-- No orphan tasks: every task must belong to a saga and chapter.
-- No blind execution: every proposal must include `narrative_reason`.
-- No claim-only completion: each completed intention must link to evidence.
-
-## Why This Solves the Current Fragmentation
-- One loop instead of parallel systems
-- One naming system
-- One constitutional filter (`PHILOSOPHY.md`)
-- One tactical library (`memory/knowledge/`)
-- One proposal-to-intent bridge
+## Design Principles Enforced
+- Radical simplicity (file-first, minimal moving parts)
+- Determinism by design
+- Operability first (status, logs, failure surfacing)
+- Guardrails with explicit policy boundaries
