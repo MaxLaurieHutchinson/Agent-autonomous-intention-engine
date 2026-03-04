@@ -21,6 +21,11 @@ jobs:
 
       - name: Compile runtime
         run: |
+          python -m py_compile src/intention_engine_core/__init__.py
+          python -m py_compile src/intention_engine_core/__main__.py
+          python -m py_compile src/intention_engine_core/cli.py
+          python -m py_compile src/intention_engine_core/path_resolver.py
+          python -m py_compile src/intention_engine_core/runtime.py
           python -m py_compile scripts/path_resolver.py
           python -m py_compile scripts/intention_engine.py
 

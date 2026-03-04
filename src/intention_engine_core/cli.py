@@ -1,0 +1,9 @@
+"""CLI entrypoint for Intention Engine package."""
+
+from __future__ import annotations
+
+from .runtime import main
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

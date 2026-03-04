@@ -2,4 +2,5 @@
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-python3 "$REPO_ROOT/scripts/intention_engine.py" run --mode micro "$@"
+export PYTHONPATH="$REPO_ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
+python3 -m intention_engine_core.cli run --mode micro "$@"

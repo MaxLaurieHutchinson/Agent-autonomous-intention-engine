@@ -222,6 +222,28 @@ class CliIntegrationTests(unittest.TestCase):
         payload = json.loads(status_run.stdout)
         self.assertIn("budget", payload)
 
+    def test_module_entrypoint_executes(self) -> None:
+        env = dict(**os.environ)
+        src_path = str(MODULE_ROOT / "src")
+        env["PYTHONPATH"] = f"{src_path}:{env['PYTHONPATH']}" if env.get("PYTHONPATH") else src_path
+
+        cmd = [
+            sys.executable,
+            "-m",
+            "intention_engine_core.cli",
+            "--config",
+            str(self.config_path),
+            "run",
+            "--mode",
+            "micro",
+            "--dry-run",
+        ]
+        completed = subprocess.run(cmd, capture_output=True, text=True, check=False, env=env)
+        self.assertEqual(completed.returncode, 0, msg=completed.stderr)
+
+        payload = json.loads(completed.stdout)
+        self.assertEqual(payload["status"], "dry_run")
+
 
 if __name__ == "__main__":
     unittest.main()
