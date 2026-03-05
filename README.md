@@ -54,6 +54,10 @@ Safe defaults in `config/runtime.json`:
 - `allow_policy_guarded_auto = false`
 - `research_deep.enabled = false`
 
+Discovery defaults are zero-secrets in this phase:
+- typed source adapters only (`reddit`, `hackernews`, `github`, `fixture`, `rss`, `arxiv`)
+- no API-key integrations enabled in core runtime contract
+
 ## OpenClaw Scheduling Model
 
 - Heartbeat (workspace-level) should trigger interruption-aware micro decisions.
@@ -82,6 +86,7 @@ Implemented now:
 - risk-aware routing and guardrails
 - replayability and operational health surfaces
 - weighted context-source cognitive orientation
+- adapter-based source discovery with deterministic filters and canonical dedupe
 
 Planned (not implemented as first-class runtime modules yet):
 - explicit BDI state model

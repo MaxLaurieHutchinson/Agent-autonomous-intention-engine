@@ -14,12 +14,14 @@ If you want to operate the engine day-to-day:
 - [Runbook](operations/runbook.md)
 - [OpenClaw Integration](operations/openclaw-integration.md)
 - [Cron vs Heartbeat](operations/cron-vs-heartbeat.md)
+- [Source Onboarding](operations/source-onboarding.md)
 - [FAQ](reference/faq.md)
 
 If you want to understand architecture and logic:
 - [System Overview](architecture/system-overview.md)
 - [Decision Engine](architecture/decision-engine.md)
 - [Cognitive Frameworks](architecture/cognitive-frameworks.md)
+- [Source Adapter Architecture](architecture/source-adapters.md)
 
 If you want to tune behavior:
 - [Runtime Config Reference](config/runtime-config-reference.md)

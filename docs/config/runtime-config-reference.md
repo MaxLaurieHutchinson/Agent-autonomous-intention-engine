@@ -12,7 +12,7 @@ Schema: `config/runtime.schema.json`
 | `mode_profiles` | object | yes | per-mode limits and enable flags |
 | `paths` | object | yes | file and directory contracts |
 | `context_sources` | array | no | deterministic cognitive context inputs for scoring |
-| `sources` | array | yes | discovery source definitions |
+| `sources` | array | yes | typed source adapter definitions |
 | `routing` | object | yes | risk and route thresholds |
 
 ## `mode_profiles`
@@ -74,15 +74,51 @@ Recommended baseline:
 
 ## `sources`
 
-Supported source types in current runtime:
-- `reddit`
-- `hackernews`
-- `github`
-- `fixture`
+Every source entry uses a typed adapter contract.
 
-Unknown type behavior:
-- candidate fetch skipped
-- discovery error captured
+Common required fields:
+- `id` (unique string)
+- `name` (string)
+- `type` (`reddit|hackernews|github|fixture|rss|arxiv`)
+
+Common optional fields:
+- `enabled` (boolean, default `true`)
+- `limit` (integer > 0)
+- `timeout_s` (integer > 0)
+- `filters` (object)
+
+Type-specific fields:
+- `reddit`: `subreddit`
+- `github`: `query`
+- `fixture`: `items[]`
+- `rss`: `feed_url`
+- `arxiv`: `categories[]` (defaults to `cs.AI`, `cs.LG`, `cs.CL`, `cs.CV`)
+- `hackernews`: optional `story_set` (`top|best|new`)
+
+### `sources[].filters`
+
+Supported filter fields:
+- `min_engagement`
+- `max_age_hours`
+- `include_keywords`
+- `exclude_keywords`
+- `domain_allowlist`
+- `domain_blocklist`
+
+Filter behavior is deterministic and applied before route scoring.
+
+### Deterministic Discovery Rules
+
+1. source execution order follows list order in config
+2. each candidate gets canonical URL normalization
+3. dedupe order:
+   - canonical URL
+   - title fingerprint
+4. final candidate ordering before scoring:
+   - `source_index`
+   - published time descending
+   - canonical URL
+   - title
 
 ## `routing`
 
@@ -107,6 +143,7 @@ intention-engine --config config/runtime.json validate --json
 
 Validation checks:
 - required config structure and fields
+- source type support and source field correctness
 - schema file availability
 - key path existence warnings (`intent_path`, philosophy, proposals dir)
 - `context_sources` match counts and unmatched-source warnings

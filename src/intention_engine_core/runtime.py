@@ -18,21 +18,19 @@ import shutil
 import sys
 import tempfile
 import textwrap
-import urllib.parse
-import urllib.request
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from .path_resolver import resolve_config_path, resolve_path_value
+from .sources.base import SourceCandidate
+from .sources.common import apply_source_filters, dedupe_candidates
+from .sources.registry import get_source_adapter, supported_source_types
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 WORKSPACE_ROOT = PROJECT_ROOT
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config" / "runtime.json"
 DEFAULT_SCHEMA_PATH = PROJECT_ROOT / "config" / "runtime.schema.json"
 FALLBACK_PHILOSOPHY_SOURCE = PROJECT_ROOT / "philosophy" / "PHILOSOPHY.md"
-
-USER_AGENT = "IntentionEngine/2.1"
-DEFAULT_TIMEOUT = 10
 
 AI_HINT_TERMS = {
     "agent",
@@ -54,13 +52,7 @@ LOW_SIGNAL_TITLE_TERMS = {
     "politics",
 }
 
-@dataclasses.dataclass
-class Candidate:
-    source: str
-    title: str
-    url: str
-    engagement: float
-    created_at: dt.datetime
+Candidate = SourceCandidate
 
 
 @dataclasses.dataclass
@@ -276,8 +268,103 @@ def validate_runtime_config(config: Dict[str, Any]) -> Tuple[List[str], List[str
     if not isinstance(config.get("paths"), dict):
         errors.append("paths must be an object")
 
-    if "sources" not in config:
-        warnings.append("sources missing; discovery will produce no candidates")
+    sources = config.get("sources")
+    if not isinstance(sources, list):
+        errors.append("sources must be an array")
+    else:
+        if not sources:
+            warnings.append("sources is empty; discovery will produce no candidates")
+
+        allowed_types = set(supported_source_types())
+        required_source_fields = ("id", "name", "type")
+        seen_ids: set[str] = set()
+        allowed_filter_fields = {
+            "min_engagement",
+            "max_age_hours",
+            "include_keywords",
+            "exclude_keywords",
+            "domain_allowlist",
+            "domain_blocklist",
+        }
+
+        for index, source in enumerate(sources):
+            if not isinstance(source, dict):
+                errors.append(f"sources[{index}] must be an object")
+                continue
+
+            for field in required_source_fields:
+                if not str(source.get(field, "")).strip():
+                    errors.append(f"sources[{index}].{field} is required")
+
+            source_id = str(source.get("id", "")).strip()
+            if source_id:
+                if source_id in seen_ids:
+                    errors.append(f"sources[{index}].id must be unique: {source_id}")
+                seen_ids.add(source_id)
+
+            source_type = str(source.get("type", "")).strip()
+            if source_type and source_type not in allowed_types:
+                errors.append(
+                    f"sources[{index}].type is unsupported: {source_type} (supported: {', '.join(sorted(allowed_types))})"
+                )
+
+            if "enabled" in source and not isinstance(source.get("enabled"), bool):
+                errors.append(f"sources[{index}].enabled must be boolean")
+
+            if "limit" in source:
+                try:
+                    limit = int(source.get("limit"))
+                except (TypeError, ValueError):
+                    errors.append(f"sources[{index}].limit must be integer")
+                else:
+                    if limit <= 0:
+                        errors.append(f"sources[{index}].limit must be > 0")
+
+            if "timeout_s" in source:
+                try:
+                    timeout = int(source.get("timeout_s"))
+                except (TypeError, ValueError):
+                    errors.append(f"sources[{index}].timeout_s must be integer")
+                else:
+                    if timeout <= 0:
+                        errors.append(f"sources[{index}].timeout_s must be > 0")
+
+            filters = source.get("filters")
+            if filters is not None:
+                if not isinstance(filters, dict):
+                    errors.append(f"sources[{index}].filters must be an object")
+                else:
+                    for key in filters.keys():
+                        if key not in allowed_filter_fields:
+                            warnings.append(f"sources[{index}].filters.{key} is unrecognized")
+                    numeric_fields = ("min_engagement", "max_age_hours")
+                    for field in numeric_fields:
+                        if field in filters:
+                            try:
+                                float(filters[field])
+                            except (TypeError, ValueError):
+                                errors.append(f"sources[{index}].filters.{field} must be numeric")
+
+                    list_string_fields = (
+                        "include_keywords",
+                        "exclude_keywords",
+                        "domain_allowlist",
+                        "domain_blocklist",
+                    )
+                    for field in list_string_fields:
+                        if field not in filters:
+                            continue
+                        value = filters.get(field)
+                        if not isinstance(value, list):
+                            errors.append(f"sources[{index}].filters.{field} must be an array")
+                            continue
+                        if any(not str(item).strip() for item in value):
+                            errors.append(f"sources[{index}].filters.{field} entries must be non-empty strings")
+
+            adapter = get_source_adapter(source_type) if source_type else None
+            if adapter is not None:
+                for adapter_error in adapter.validate(source):
+                    errors.append(f"sources[{index}]: {adapter_error}")
 
     deprecated_fields = ("idle_threshold_minutes", "intake", "external_action_keywords")
     for field in deprecated_fields:
@@ -357,135 +444,140 @@ def ensure_runtime_directories(paths: RuntimePaths) -> None:
         directory.mkdir(parents=True, exist_ok=True)
 
 
-def fetch_json(url: str, headers: Optional[Dict[str, str]] = None, timeout: int = DEFAULT_TIMEOUT) -> Any:
-    req_headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
-    if headers:
-        req_headers.update(headers)
-    req = urllib.request.Request(url, headers=req_headers)
-    with urllib.request.urlopen(req, timeout=timeout) as response:
-        return json.loads(response.read().decode("utf-8"))
+def _source_error(source: Dict[str, Any], code: str, message: str) -> Dict[str, Any]:
+    return {
+        "source_id": str(source.get("id", "unknown")),
+        "source_name": str(source.get("name", source.get("id", "unknown"))),
+        "source_type": str(source.get("type", "unknown")),
+        "code": code,
+        "message": message,
+    }
 
 
-def fetch_reddit(subreddit: str, limit: int) -> List[Candidate]:
-    url = f"https://www.reddit.com/r/{subreddit}/hot.json?limit={limit}&raw_json=1"
-    payload = fetch_json(url)
-    children = payload.get("data", {}).get("children", [])
-    output: List[Candidate] = []
-    for child in children:
-        data = child.get("data", {})
-        if data.get("stickied"):
-            continue
-        title = data.get("title")
-        link = data.get("url")
-        if not title or not link:
-            continue
-        engagement = float(data.get("ups", 0)) + float(data.get("num_comments", 0))
-        created_ts = dt.datetime.fromtimestamp(float(data.get("created_utc", 0)), tz=dt.timezone.utc)
-        output.append(
-            Candidate(
-                source=f"reddit/r/{subreddit}",
-                title=title,
-                url=link,
-                engagement=engagement,
-                created_at=created_ts,
-            )
-        )
-    return output
+def _safe_int(value: Any, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
 
-def fetch_hackernews(limit: int) -> List[Candidate]:
-    ids = fetch_json("https://hacker-news.firebaseio.com/v0/topstories.json")
-    output: List[Candidate] = []
-    for item_id in ids[: max(limit * 3, 30)]:
-        item = fetch_json(f"https://hacker-news.firebaseio.com/v0/item/{item_id}.json")
-        if item.get("type") != "story":
-            continue
-        title = item.get("title") or ""
-        if not title:
-            continue
-        title_words = set(re.findall(r"[a-zA-Z]{2,}", title.lower()))
-        if not (title_words & AI_HINT_TERMS):
-            continue
-        engagement = float(item.get("score", 0)) + float(item.get("descendants", 0))
-        created_ts = dt.datetime.fromtimestamp(float(item.get("time", 0)), tz=dt.timezone.utc)
-        output.append(
-            Candidate(
-                source="hackernews",
-                title=title,
-                url=item.get("url") or f"https://news.ycombinator.com/item?id={item_id}",
-                engagement=engagement,
-                created_at=created_ts,
-            )
-        )
-        if len(output) >= limit:
-            break
-    return output
-
-
-def fetch_github_repos(query: str, limit: int) -> List[Candidate]:
-    encoded_query = urllib.parse.quote(query)
-    url = f"https://api.github.com/search/repositories?q={encoded_query}&sort=stars&order=desc&per_page={limit}"
-    payload = fetch_json(url, headers={"Accept": "application/vnd.github+json"})
-    output: List[Candidate] = []
-    for repo in payload.get("items", []):
-        name = repo.get("full_name", "unknown")
-        title = f"{name}: {repo.get('description') or 'No description'}"
-        updated_at = parse_datetime(str(repo.get("updated_at", "")))
-        output.append(
-            Candidate(
-                source="github/search",
-                title=title,
-                url=repo.get("html_url") or "https://github.com",
-                engagement=float(repo.get("stargazers_count", 0)),
-                created_at=updated_at,
-            )
-        )
-    return output
-
-
-def load_fixture_candidates(source: Dict[str, Any]) -> List[Candidate]:
-    output: List[Candidate] = []
-    for item in source.get("items", []):
-        title = str(item.get("title", "")).strip()
-        url = str(item.get("url", "")).strip()
-        if not title or not url:
-            continue
-        created = parse_datetime(str(item.get("created_at", to_iso8601(utc_now()))))
-        output.append(
-            Candidate(
-                source=str(source.get("name", "fixture")),
-                title=title,
-                url=url,
-                engagement=float(item.get("engagement", 1.0)),
-                created_at=created,
-            )
-        )
-    return output
-
-
-def discover_candidates(config: Dict[str, Any]) -> Tuple[List[Candidate], List[str]]:
+def discover_candidates(
+    config: Dict[str, Any],
+    now: dt.datetime,
+) -> Tuple[List[Candidate], List[Dict[str, Any]], List[Dict[str, Any]], Dict[str, int]]:
     candidates: List[Candidate] = []
-    errors: List[str] = []
+    errors: List[Dict[str, Any]] = []
+    source_stats: List[Dict[str, Any]] = []
 
-    for source in config.get("sources", []):
-        source_type = source.get("type")
-        try:
-            if source_type == "reddit":
-                items = fetch_reddit(str(source["subreddit"]), int(source.get("limit", 10)))
-            elif source_type == "hackernews":
-                items = fetch_hackernews(int(source.get("limit", 20)))
-            elif source_type == "github":
-                items = fetch_github_repos(str(source.get("query", "agentic ai")), int(source.get("limit", 10)))
-            elif source_type == "fixture":
-                items = load_fixture_candidates(source)
-            else:
-                errors.append(f"unknown source type: {source_type}")
-                continue
-            candidates.extend(items)
-        except Exception as exc:  # pragma: no cover - external IO
-            errors.append(f"{source.get('name', source_type)}: {exc}")
+    configured_sources = config.get("sources", [])
+    if not isinstance(configured_sources, list):
+        return [], [_source_error({}, "source_unknown", "sources must be an array")], [], {"input": 0, "kept": 0}
 
-    return candidates, errors
+    for index, source in enumerate(configured_sources):
+        if not isinstance(source, dict):
+            errors.append(_source_error({}, "source_unknown", f"sources[{index}] must be an object"))
+            continue
+
+        source_type = str(source.get("type", "")).strip()
+        source_id = str(source.get("id") or f"{source_type or 'source'}-{index + 1}")
+        source_name = str(source.get("name") or source_id)
+        enabled = bool(source.get("enabled", True))
+        limit = max(_safe_int(source.get("limit", 20), 20), 0)
+        timeout_s = max(_safe_int(source.get("timeout_s", 10), 10), 1)
+
+        source_spec = dict(source)
+        source_spec["id"] = source_id
+        source_spec["name"] = source_name
+        source_spec["enabled"] = enabled
+        source_spec["limit"] = limit
+        source_spec["timeout_s"] = timeout_s
+        source_spec["_source_index"] = index
+
+        if not enabled:
+            source_stats.append(
+                {
+                    "source_id": source_id,
+                    "source_name": source_name,
+                    "source_type": source_type,
+                    "enabled": False,
+                    "fetched": 0,
+                    "kept_after_filters": 0,
+                    "kept_after_limit": 0,
+                    "error_count": 0,
+                    "filter_stats": {"input": 0, "kept": 0},
+                }
+            )
+            continue
+
+        adapter = get_source_adapter(source_type)
+        if adapter is None:
+            error = _source_error(source_spec, "source_unknown", f"unsupported source type: {source_type}")
+            errors.append(error)
+            source_stats.append(
+                {
+                    "source_id": source_id,
+                    "source_name": source_name,
+                    "source_type": source_type,
+                    "enabled": True,
+                    "fetched": 0,
+                    "kept_after_filters": 0,
+                    "kept_after_limit": 0,
+                    "error_count": 1,
+                    "filter_stats": {"input": 0, "kept": 0},
+                }
+            )
+            continue
+
+        validation_errors = adapter.validate(source_spec)
+        if validation_errors:
+            for message in validation_errors:
+                errors.append(_source_error(source_spec, "source_unknown", message))
+            source_stats.append(
+                {
+                    "source_id": source_id,
+                    "source_name": source_name,
+                    "source_type": source_type,
+                    "enabled": True,
+                    "fetched": 0,
+                    "kept_after_filters": 0,
+                    "kept_after_limit": 0,
+                    "error_count": len(validation_errors),
+                    "filter_stats": {"input": 0, "kept": 0},
+                }
+            )
+            continue
+
+        result = adapter.fetch(source_spec, now)
+        filtered, filter_stats = apply_source_filters(result.candidates, source_spec.get("filters"), now)
+        limited = filtered[:limit]
+
+        candidates.extend(limited)
+        errors.extend(result.errors)
+        source_stats.append(
+            {
+                "source_id": source_id,
+                "source_name": source_name,
+                "source_type": source_type,
+                "enabled": True,
+                "fetched": len(result.candidates),
+                "kept_after_filters": len(filtered),
+                "kept_after_limit": len(limited),
+                "error_count": len(result.errors),
+                "filter_stats": filter_stats,
+                "adapter_stats": result.stats,
+            }
+        )
+
+    deduped, dedupe_stats = dedupe_candidates(candidates)
+    deduped.sort(
+        key=lambda item: (
+            int(item.source_index),
+            -int(item.created_at.timestamp()),
+            item.canonical_url,
+            item.title.lower(),
+        )
+    )
+    return deduped, errors, source_stats, dedupe_stats
 
 
 def extract_keywords(paths: RuntimePaths, config: Dict[str, Any], limit: int = 150) -> Tuple[List[str], List[Dict[str, Any]]]:
@@ -852,10 +944,16 @@ def run_engine(mode: str, config: Dict[str, Any], paths: RuntimePaths, dry_run: 
                     "required_gbp": float(profile.get("max_run_cost", 0.0)),
                 }
 
-        candidates, discovery_errors = discover_candidates(config)
+        candidates, discovery_errors, source_stats, dedupe_stats = discover_candidates(config, run_started)
         keywords, context_sources = extract_keywords(paths, config, limit=200)
         scored = [score_candidate(candidate, keywords, routing, run_started) for candidate in candidates]
-        scored.sort(key=lambda item: item.score, reverse=True)
+        scored.sort(
+            key=lambda item: (
+                -item.score,
+                item.candidate.canonical_url,
+                item.candidate.title.lower(),
+            )
+        )
 
         max_items = int(profile.get("max_items", 1))
         picked = scored[:max_items]
@@ -886,6 +984,9 @@ def run_engine(mode: str, config: Dict[str, Any], paths: RuntimePaths, dry_run: 
                     "title": proposal.title,
                     "url": proposal.url,
                     "source": proposal.source,
+                    "source_id": scored_item.candidate.source_id,
+                    "source_type": scored_item.candidate.source_type,
+                    "canonical_url": scored_item.candidate.canonical_url,
                     "score": round(scored_item.score, 6),
                     "relevance": round(scored_item.relevance, 6),
                     "autonomy_class": scored_item.autonomy_class,
@@ -910,11 +1011,19 @@ def run_engine(mode: str, config: Dict[str, Any], paths: RuntimePaths, dry_run: 
             "mode_profile": profile,
             "context_sources": context_sources,
             "candidate_count": len(candidates),
+            "source_stats": source_stats,
+            "dedupe_stats": dedupe_stats,
             "candidates": [
                 {
                     "source": candidate.source,
+                    "source_id": candidate.source_id,
+                    "source_name": candidate.source_name,
+                    "source_type": candidate.source_type,
+                    "source_index": candidate.source_index,
                     "title": candidate.title,
                     "url": candidate.url,
+                    "canonical_url": candidate.canonical_url,
+                    "title_fingerprint": candidate.title_fingerprint,
                     "engagement": round(candidate.engagement, 4),
                     "created_at": to_iso8601(candidate.created_at),
                 }
@@ -927,11 +1036,16 @@ def run_engine(mode: str, config: Dict[str, Any], paths: RuntimePaths, dry_run: 
             "run_id": run_id,
             "keywords": keywords,
             "context_sources": context_sources,
+            "source_stats": source_stats,
+            "dedupe_stats": dedupe_stats,
             "scores": [
                 {
                     "title": scored_item.candidate.title,
                     "url": scored_item.candidate.url,
+                    "canonical_url": scored_item.candidate.canonical_url,
                     "source": scored_item.candidate.source,
+                    "source_id": scored_item.candidate.source_id,
+                    "source_type": scored_item.candidate.source_type,
                     "score": round(scored_item.score, 6),
                     "relevance": round(scored_item.relevance, 6),
                     "value": round(scored_item.value, 6),
@@ -949,6 +1063,8 @@ def run_engine(mode: str, config: Dict[str, Any], paths: RuntimePaths, dry_run: 
             "started_at": to_iso8601(run_started),
             "mode": mode,
             "routing": routing,
+            "source_stats": source_stats,
+            "dedupe_stats": dedupe_stats,
             "decisions": decisions,
         }
 
@@ -972,6 +1088,8 @@ def run_engine(mode: str, config: Dict[str, Any], paths: RuntimePaths, dry_run: 
                     "approved": approved,
                     "deferred": deferred,
                     "awaiting_human_gate": awaiting_human_gate,
+                    "source_error_count": len(discovery_errors),
+                    "source_stats": source_stats,
                 }
             )
             atomic_write_json(paths.budget_state_path, budget_state)
@@ -987,6 +1105,9 @@ def run_engine(mode: str, config: Dict[str, Any], paths: RuntimePaths, dry_run: 
             "deferred": deferred,
             "awaiting_human_gate": awaiting_human_gate,
             "network_errors": len(discovery_errors),
+            "source_error_count": len(discovery_errors),
+            "source_stats": source_stats,
+            "dedupe_stats": dedupe_stats,
             "run_cost_gbp": round(run_cost, 4),
             "budget_remaining_gbp": round(float(budget_state.get("remaining_gbp", 0.0)), 4),
             "replay_bundle": str(replay_dir),
@@ -1077,15 +1198,18 @@ def status_report(config: Dict[str, Any], paths: RuntimePaths) -> Dict[str, Any]
 
     announce_failures = inspect_announce_failures(paths.cron_jobs_path)
     recent_error_count = count_recent_log_errors(paths.logs_path, now)
+    last_run_source_error_count = int(last_run.get("source_error_count", 0)) if isinstance(last_run, dict) else 0
+    last_run_source_stats = last_run.get("source_stats", []) if isinstance(last_run, dict) else []
 
     health_status = "ok"
-    if validation_errors or announce_failures or recent_error_count > 0:
+    if validation_errors or announce_failures or recent_error_count > 0 or last_run_source_error_count > 0:
         health_status = "degraded"
 
     failure_taxonomy = {
         "config_validation_error_count": len(validation_errors),
         "announce_delivery_failure_count": len(announce_failures),
         "runtime_log_error_count_24h": recent_error_count,
+        "source_error_count_last_run": last_run_source_error_count,
     }
     actionable_errors: List[Dict[str, Any]] = []
 
@@ -1119,6 +1243,16 @@ def status_report(config: Dict[str, Any], paths: RuntimePaths) -> Dict[str, Any]
             }
         )
 
+    if last_run_source_error_count > 0:
+        actionable_errors.append(
+            {
+                "code": "DISCOVERY_SOURCE_ERRORS_PRESENT",
+                "severity": "warning",
+                "message": f"Last run had {last_run_source_error_count} source discovery errors",
+                "details": {"source_stats": last_run_source_stats},
+            }
+        )
+
     result = {
         "status": health_status,
         "timestamp": to_iso8601(now),
@@ -1138,6 +1272,10 @@ def status_report(config: Dict[str, Any], paths: RuntimePaths) -> Dict[str, Any]
             "validation_warnings": validation_warnings,
             "announce_failures": announce_failures,
             "recent_log_errors_24h": recent_error_count,
+            "source_health": {
+                "last_run_source_error_count": last_run_source_error_count,
+                "last_run_source_stats": last_run_source_stats,
+            },
             "failure_taxonomy": failure_taxonomy,
             "actionable_errors": actionable_errors,
         },
@@ -1191,6 +1329,25 @@ def validate_runtime(config: Dict[str, Any], config_path: Path, paths: RuntimePa
             if not matches:
                 warnings.append(f"context source '{name}' matched no files: {path_pattern}")
 
+    source_checks: List[Dict[str, Any]] = []
+    sources = config.get("sources", [])
+    if isinstance(sources, list):
+        for index, source in enumerate(sources):
+            if not isinstance(source, dict):
+                continue
+            source_type = str(source.get("type", "")).strip()
+            source_id = str(source.get("id", f"source_{index}"))
+            enabled = bool(source.get("enabled", True))
+            check = {
+                "id": source_id,
+                "type": source_type,
+                "enabled": enabled,
+                "supported": source_type in supported_source_types(),
+            }
+            source_checks.append(check)
+            if enabled and not check["supported"]:
+                errors.append(f"source '{source_id}' has unsupported type '{source_type}'")
+
     return {
         "status": "ok" if not errors else "error",
         "config_path": str(config_path),
@@ -1199,6 +1356,7 @@ def validate_runtime(config: Dict[str, Any], config_path: Path, paths: RuntimePa
         "errors": errors,
         "warnings": warnings,
         "context_checks": context_checks,
+        "source_checks": source_checks,
         "paths": {
             "intent_path": str(paths.intent_path),
             "reflect_path": str(paths.reflect_path),
@@ -1267,6 +1425,8 @@ def replay_run(run_id: str, paths: RuntimePaths) -> Dict[str, Any]:
         "scores_present": bool(scores),
         "config_hash_present": config_hash_path.exists(),
         "context_sources_present": bool(inputs.get("context_sources")) and bool(scores.get("context_sources")),
+        "source_provenance_present": bool(inputs.get("source_stats")) and bool(scores.get("source_stats")),
+        "dedupe_stats_present": bool(inputs.get("dedupe_stats")) and bool(scores.get("dedupe_stats")),
         "actionable_errors": [
             {
                 "code": "ROUTE_MISMATCH_DETECTED",
@@ -1298,6 +1458,7 @@ def render_status_text(payload: Dict[str, Any]) -> str:
     budget = payload.get("budget", {})
     queues = payload.get("queues", {})
     actionable_errors = health.get("actionable_errors", [])
+    source_health = health.get("source_health", {})
     lines = [
         f"status: {payload.get('status')}",
         f"budget remaining: GBP {budget.get('remaining_gbp', 0):.2f}",
@@ -1305,6 +1466,8 @@ def render_status_text(payload: Dict[str, Any]) -> str:
     ]
     if health.get("announce_failures"):
         lines.append(f"announce failures: {len(health['announce_failures'])}")
+    if source_health.get("last_run_source_error_count", 0):
+        lines.append(f"source errors (last run): {source_health.get('last_run_source_error_count', 0)}")
     if actionable_errors:
         lines.append(f"actionable errors: {len(actionable_errors)}")
     return "\n".join(lines)

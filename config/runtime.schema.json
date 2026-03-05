@@ -94,7 +94,7 @@
     "sources": {
       "type": "array",
       "items": {
-        "type": "object"
+        "$ref": "#/$defs/sourceEntry"
       }
     },
     "context_sources": {
@@ -206,6 +206,149 @@
         "weight": {
           "type": "number",
           "exclusiveMinimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
+    "fixtureItem": {
+      "type": "object",
+      "required": [
+        "title",
+        "url"
+      ],
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "url": {
+          "type": "string",
+          "minLength": 1
+        },
+        "engagement": {
+          "type": "number"
+        },
+        "created_at": {
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "sourceFilters": {
+      "type": "object",
+      "properties": {
+        "min_engagement": {
+          "type": "number",
+          "minimum": 0
+        },
+        "max_age_hours": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "include_keywords": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "exclude_keywords": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "domain_allowlist": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "domain_blocklist": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "sourceEntry": {
+      "type": "object",
+      "required": [
+        "id",
+        "name",
+        "type"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "reddit",
+            "hackernews",
+            "github",
+            "fixture",
+            "rss",
+            "arxiv"
+          ]
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "timeout_s": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "filters": {
+          "$ref": "#/$defs/sourceFilters"
+        },
+        "subreddit": {
+          "type": "string",
+          "minLength": 1
+        },
+        "query": {
+          "type": "string",
+          "minLength": 1
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/fixtureItem"
+          }
+        },
+        "feed_url": {
+          "type": "string",
+          "minLength": 1
+        },
+        "categories": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "story_set": {
+          "type": "string",
+          "enum": [
+            "top",
+            "best",
+            "new"
+          ]
         }
       },
       "additionalProperties": false

@@ -121,8 +121,15 @@ class CliIntegrationTests(unittest.TestCase):
                     ],
                     "sources": [
                         {
+                            "id": "fixture-intake",
                             "type": "fixture",
                             "name": "test-fixture",
+                            "enabled": True,
+                            "limit": 10,
+                            "timeout_s": 5,
+                            "filters": {
+                                "max_age_hours": 720
+                            },
                             "items": [
                                 {
                                     "title": "Agent architecture benchmark",
@@ -159,9 +166,10 @@ class CliIntegrationTests(unittest.TestCase):
 
     def run_cli(self, args):
         cli_bin = shutil.which("intention-engine")
-        if not cli_bin:
-            self.fail("intention-engine executable not found in PATH; run `python3 -m pip install -e .`")
-        cmd = [cli_bin, "--config", str(self.config_path)] + list(args)
+        if cli_bin:
+            cmd = [cli_bin, "--config", str(self.config_path)] + list(args)
+        else:
+            cmd = ["python3", "-m", "intention_engine_core.cli", "--config", str(self.config_path)] + list(args)
         return subprocess.run(cmd, capture_output=True, text=True, check=False)
 
     def parse_stdout_json(self, completed: subprocess.CompletedProcess):
@@ -253,6 +261,17 @@ class CliIntegrationTests(unittest.TestCase):
         self.assertNotEqual(completed.returncode, 0)
         validate_payload = self.parse_stdout_json(completed)
         self.assertIn("intake is no longer supported in this runtime contract", validate_payload["errors"])
+
+    def test_validate_rejects_unsupported_source_type(self) -> None:
+        payload = json.loads(self.config_path.read_text(encoding="utf-8"))
+        payload["sources"][0]["type"] = "foorilla"
+        self.config_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+
+        completed = self.run_cli(["validate", "--json"])
+        self.assertNotEqual(completed.returncode, 0)
+        validate_payload = self.parse_stdout_json(completed)
+        error_text = "\n".join(validate_payload.get("errors", []))
+        self.assertIn("unsupported", error_text.lower())
 
 
 if __name__ == "__main__":

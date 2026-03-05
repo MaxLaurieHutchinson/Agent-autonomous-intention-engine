@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "intention-engine"
-version = "2.2.0"
+version = "2.3.0"
 description = "Single deployable Intention Engine with deterministic runtime, safe guardrails, and canonical CLI."
 readme = "README.md"
 requires-python = ">=3.9"

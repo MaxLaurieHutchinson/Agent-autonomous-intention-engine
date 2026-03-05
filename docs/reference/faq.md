@@ -7,11 +7,35 @@ It continuously discovers candidate opportunities, scores and routes them with g
 ## Where is OODA used?
 
 OODA is implemented behaviorally in the run pipeline:
-- Observe: source discovery
+- Observe: source adapter discovery
 - Orient: keyword extraction + scoring
 - Decide: risk classification + routing
 - Act: persistence + budget application
 - Reflect: metrics/reflect/replay outputs
+
+## How are sources implemented now?
+
+Through typed adapters in `src/intention_engine_core/sources/`.
+
+Supported source types:
+- `reddit`
+- `hackernews`
+- `github`
+- `fixture`
+- `rss`
+- `arxiv`
+
+## Do sources require API keys?
+
+Not in this phase. The active source contract is zero-secrets.
+
+## How does dedupe work?
+
+Candidate dedupe is deterministic and runs in this order:
+1. canonical URL dedupe
+2. title fingerprint dedupe
+
+Dedupe stats are persisted in replay artifacts.
 
 ## Is BDI implemented?
 
@@ -31,7 +55,7 @@ Markdown decision artifacts that represent routed opportunities. They are persis
 
 ## What are metrics?
 
-Daily JSON rollups of run summaries. They track operational throughput, route outcomes, budget progression, and discovery error counts.
+Daily JSON rollups of run summaries. They track operational throughput, route outcomes, budget progression, and discovery/source error counts.
 
 ## What belongs in cron vs heartbeat?
 
@@ -47,6 +71,7 @@ Daily JSON rollups of run summaries. They track operational throughput, route ou
 
 Any of these can degrade health:
 - config validation errors
+- source discovery errors on the last run
 - detected announce-delivery failures in OpenClaw jobs state
 - recent runtime errors in logs
 

@@ -13,7 +13,7 @@ This document separates what is implemented now from what is roadmap.
 ## OODA (Implemented)
 
 ### Observe
-- Candidate collection from configured sources (`reddit`, `hackernews`, `github`, `fixture`).
+- Candidate collection from configured source adapters (`reddit`, `hackernews`, `github`, `fixture`, `rss`, `arxiv`).
 
 ### Orient
 - Weighted keyword extraction from configured `context_sources` (for example `INTENT`, `PHILOSOPHY`, and `memory/knowledge/*`).
