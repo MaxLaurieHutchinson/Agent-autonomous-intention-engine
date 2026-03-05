@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.1.4 - 2026-03-05 (dev)
+- Hardened CI for release-readiness:
+  - added `ops/bootstrap-workspace.sh` execution in CI to initialize expected runtime files and directories
+  - added editable package install smoke (`pip install -e .` + import check)
+- Kept runtime behavior unchanged; this update only strengthens build validation gates.
+
 ## v2.1.3 - 2026-03-05 (dev)
 - Added `ops/bootstrap-workspace.sh` to initialize required workspace state for fresh clones:
   - creates configured intent/reflect files when missing
