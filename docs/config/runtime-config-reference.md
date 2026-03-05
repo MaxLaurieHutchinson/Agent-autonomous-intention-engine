@@ -1,6 +1,6 @@
 # Runtime Config Reference
 
-Source file: `config/runtime.json`
+Source file: `config/runtime.json`  
 Schema: `config/runtime.schema.json`
 
 ## Top-Level Fields
@@ -11,11 +11,9 @@ Schema: `config/runtime.schema.json`
 | `reserve_budget_gbp` | number | yes | reserved budget not allocatable |
 | `mode_profiles` | object | yes | per-mode limits and enable flags |
 | `paths` | object | yes | file and directory contracts |
+| `context_sources` | array | no | deterministic cognitive context inputs for scoring |
 | `sources` | array | yes | discovery source definitions |
 | `routing` | object | yes | risk and route thresholds |
-| `idle_threshold_minutes` | number | no | optional integration hint |
-| `intake` | object | no | optional downstream intake defaults |
-| `external_action_keywords` | array | no | optional policy signals |
 
 ## `mode_profiles`
 
@@ -54,6 +52,26 @@ Resolution rules:
 - `~`: home-expanded
 - relative: resolved from workspace root
 
+## `context_sources`
+
+Each entry:
+- `name` (string, required)
+- `path` (string, required; accepts file path or glob)
+- `weight` (number > 0, optional, default `1.0`)
+
+Behavior:
+- loaded in list order
+- glob expansion order is deterministic (sorted)
+- weighted token contribution influences keyword extraction used by scoring
+- context details are persisted into replay artifacts (`inputs.json` and `scores.json`)
+
+Recommended baseline:
+- `memory/INTENT.md`
+- `memory/PHILOSOPHY.md`
+- `memory/knowledge/frameworks/*.md`
+- `memory/knowledge/patterns/*.md`
+- `memory/knowledge/insights/*.md`
+
 ## `sources`
 
 Supported source types in current runtime:
@@ -81,21 +99,14 @@ Recommended defaults:
 - keep `allow_policy_guarded_auto = false` for safe-by-default behavior
 - keep human-gate keyword list strict for irreversible actions
 
-## Optional Sections
-
-### `intake`
-Not consumed by core routing today; available for downstream intention insertion workflows.
-
-### `external_action_keywords`
-Not directly enforced in routing logic today; useful for policy and integration layers.
-
-## Validation Commands
+## Validation Command
 
 ```bash
-PYTHONPATH=./src python3 -m intention_engine_core.cli validate --json
+intention-engine --config config/runtime.json validate --json
 ```
 
 Validation checks:
 - required config structure and fields
 - schema file availability
 - key path existence warnings (`intent_path`, philosophy, proposals dir)
+- `context_sources` match counts and unmatched-source warnings

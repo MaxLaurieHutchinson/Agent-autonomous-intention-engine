@@ -15,6 +15,7 @@ Use both, but for different responsibilities.
 - quick status checks
 - low-cost safety/attention routing
 - immediate skip behavior when human is active
+- canonical command surface: `intention-engine --config config/runtime.json ...`
 
 Do not place long, deep, or expensive pipelines directly in heartbeat.
 
@@ -23,6 +24,7 @@ Do not place long, deep, or expensive pipelines directly in heartbeat.
 - deep scouting/exploration runs
 - briefing generation
 - maintenance jobs that can run isolated
+- canonical command surface: `intention-engine --config config/runtime.json ...`
 
 Cron is the right place for predictable wall-clock operations.
 

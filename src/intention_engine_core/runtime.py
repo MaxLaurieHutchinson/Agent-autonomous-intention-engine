@@ -8,6 +8,7 @@ import contextlib
 import dataclasses
 import datetime as dt
 import fcntl
+import glob
 import hashlib
 import json
 import math
@@ -210,6 +211,19 @@ def tokenize(text: str) -> List[str]:
     return [word for word in words if word not in stop]
 
 
+def expand_context_paths(raw_pattern: str, workspace_root: Path) -> List[Path]:
+    pattern = os.path.expanduser(raw_pattern)
+    if not os.path.isabs(pattern):
+        pattern = str((workspace_root / pattern).resolve())
+
+    if any(token in pattern for token in ("*", "?", "[")):
+        matched = sorted(Path(entry).resolve() for entry in glob.glob(pattern, recursive=True))
+        return [path for path in matched if path.is_file()]
+
+    path = Path(pattern).resolve()
+    return [path] if path.is_file() else []
+
+
 def config_hash(config: Dict[str, Any]) -> str:
     payload = json.dumps(config, sort_keys=True, separators=(",", ":")).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
@@ -264,6 +278,32 @@ def validate_runtime_config(config: Dict[str, Any]) -> Tuple[List[str], List[str
 
     if "sources" not in config:
         warnings.append("sources missing; discovery will produce no candidates")
+
+    deprecated_fields = ("idle_threshold_minutes", "intake", "external_action_keywords")
+    for field in deprecated_fields:
+        if field in config:
+            errors.append(f"{field} is no longer supported in this runtime contract")
+
+    context_sources = config.get("context_sources")
+    if context_sources is not None:
+        if not isinstance(context_sources, list):
+            errors.append("context_sources must be an array when provided")
+        else:
+            for index, entry in enumerate(context_sources):
+                if not isinstance(entry, dict):
+                    errors.append(f"context_sources[{index}] must be an object")
+                    continue
+                if not str(entry.get("name", "")).strip():
+                    errors.append(f"context_sources[{index}].name is required")
+                if not str(entry.get("path", "")).strip():
+                    errors.append(f"context_sources[{index}].path is required")
+                try:
+                    weight = float(entry.get("weight", 1.0))
+                except (TypeError, ValueError):
+                    errors.append(f"context_sources[{index}].weight must be numeric")
+                    continue
+                if weight <= 0:
+                    errors.append(f"context_sources[{index}].weight must be > 0")
 
     return errors, warnings
 
@@ -448,18 +488,65 @@ def discover_candidates(config: Dict[str, Any]) -> Tuple[List[Candidate], List[s
     return candidates, errors
 
 
-def extract_keywords(paths: RuntimePaths, limit: int = 150) -> List[str]:
-    intent_text = read_text(paths.intent_path)
-    philosophy_text = read_text(paths.philosophy_path)
-    if not philosophy_text:
-        philosophy_text = read_text(paths.philosophy_fallback_path)
+def extract_keywords(paths: RuntimePaths, config: Dict[str, Any], limit: int = 150) -> Tuple[List[str], List[Dict[str, Any]]]:
+    configured_sources = config.get("context_sources")
+    source_specs: List[Dict[str, Any]] = []
 
-    combined = tokenize(intent_text + "\n" + philosophy_text)
-    frequency: Dict[str, int] = {}
-    for word in combined:
-        frequency[word] = frequency.get(word, 0) + 1
-    ordered = sorted(frequency.items(), key=lambda item: item[1], reverse=True)
-    return [word for word, _ in ordered[:limit]]
+    if isinstance(configured_sources, list) and configured_sources:
+        for index, entry in enumerate(configured_sources):
+            if not isinstance(entry, dict):
+                continue
+            raw_name = str(entry.get("name", f"context_{index}")).strip()
+            raw_path = str(entry.get("path", "")).strip()
+            if not raw_name or not raw_path:
+                continue
+            try:
+                weight = float(entry.get("weight", 1.0))
+            except (TypeError, ValueError):
+                continue
+            if weight <= 0:
+                continue
+            source_specs.append({"name": raw_name, "path": raw_path, "weight": weight})
+
+    if not source_specs:
+        source_specs = [
+            {"name": "intent", "path": str(paths.intent_path), "weight": 1.0},
+            {"name": "philosophy", "path": str(paths.philosophy_path), "weight": 1.0},
+        ]
+
+    frequency: Dict[str, float] = {}
+    context_details: List[Dict[str, Any]] = []
+
+    for spec in source_specs:
+        source_name = str(spec["name"])
+        source_weight = float(spec["weight"])
+        source_path = str(spec["path"])
+
+        resolved_files = expand_context_paths(source_path, WORKSPACE_ROOT)
+        if not resolved_files and source_name == "philosophy":
+            fallback = paths.philosophy_fallback_path.resolve()
+            if fallback.is_file():
+                resolved_files = [fallback]
+
+        for file_path in resolved_files:
+            text = read_text(file_path)
+            words = tokenize(text)
+            if not words:
+                continue
+            for word in words:
+                frequency[word] = frequency.get(word, 0.0) + source_weight
+            context_details.append(
+                {
+                    "name": source_name,
+                    "path": str(file_path),
+                    "weight": source_weight,
+                    "token_count": len(words),
+                }
+            )
+
+    ordered = sorted(frequency.items(), key=lambda item: (-item[1], item[0]))
+    keywords = [word for word, _ in ordered[:limit]]
+    return keywords, context_details
 
 
 def classify_risk(title: str, url: str, routing: Dict[str, Any]) -> Tuple[float, bool, str]:
@@ -766,7 +853,7 @@ def run_engine(mode: str, config: Dict[str, Any], paths: RuntimePaths, dry_run: 
                 }
 
         candidates, discovery_errors = discover_candidates(config)
-        keywords = extract_keywords(paths, limit=200)
+        keywords, context_sources = extract_keywords(paths, config, limit=200)
         scored = [score_candidate(candidate, keywords, routing, run_started) for candidate in candidates]
         scored.sort(key=lambda item: item.score, reverse=True)
 
@@ -821,6 +908,7 @@ def run_engine(mode: str, config: Dict[str, Any], paths: RuntimePaths, dry_run: 
             "mode": mode,
             "dry_run": dry_run,
             "mode_profile": profile,
+            "context_sources": context_sources,
             "candidate_count": len(candidates),
             "candidates": [
                 {
@@ -838,6 +926,7 @@ def run_engine(mode: str, config: Dict[str, Any], paths: RuntimePaths, dry_run: 
         scores_payload = {
             "run_id": run_id,
             "keywords": keywords,
+            "context_sources": context_sources,
             "scores": [
                 {
                     "title": scored_item.candidate.title,
@@ -993,6 +1082,43 @@ def status_report(config: Dict[str, Any], paths: RuntimePaths) -> Dict[str, Any]
     if validation_errors or announce_failures or recent_error_count > 0:
         health_status = "degraded"
 
+    failure_taxonomy = {
+        "config_validation_error_count": len(validation_errors),
+        "announce_delivery_failure_count": len(announce_failures),
+        "runtime_log_error_count_24h": recent_error_count,
+    }
+    actionable_errors: List[Dict[str, Any]] = []
+
+    if validation_errors:
+        actionable_errors.append(
+            {
+                "code": "CONFIG_VALIDATION_FAILED",
+                "severity": "error",
+                "message": "Runtime configuration validation failed",
+                "details": validation_errors,
+            }
+        )
+
+    for failure in announce_failures:
+        actionable_errors.append(
+            {
+                "code": "ANNOUNCE_DELIVERY_FAILED",
+                "severity": "warning",
+                "message": f"Announcement delivery failed for job '{failure.get('name', 'unknown')}'",
+                "details": failure,
+            }
+        )
+
+    if recent_error_count > 0:
+        actionable_errors.append(
+            {
+                "code": "RUNTIME_LOG_ERRORS_PRESENT",
+                "severity": "warning",
+                "message": f"Found {recent_error_count} runtime error logs in the last 24 hours",
+                "details": {"count": recent_error_count},
+            }
+        )
+
     result = {
         "status": health_status,
         "timestamp": to_iso8601(now),
@@ -1006,21 +1132,24 @@ def status_report(config: Dict[str, Any], paths: RuntimePaths) -> Dict[str, Any]
         "queues": queues,
         "last_run": last_run,
         "health": {
+            "status": health_status,
             "config_valid": len(validation_errors) == 0,
             "validation_errors": validation_errors,
             "validation_warnings": validation_warnings,
             "announce_failures": announce_failures,
             "recent_log_errors_24h": recent_error_count,
+            "failure_taxonomy": failure_taxonomy,
+            "actionable_errors": actionable_errors,
         },
     }
 
-    if announce_failures:
+    if actionable_errors:
         write_engine_log(
             paths,
             level="warning",
-            event="announce_delivery_failure",
-            message="One or more orchestrated cron jobs report announce delivery failures",
-            extra={"count": len(announce_failures), "jobs": announce_failures},
+            event="actionable_status_errors",
+            message="Status report surfaced actionable operational errors",
+            extra={"count": len(actionable_errors), "items": actionable_errors},
         )
 
     return result
@@ -1041,6 +1170,27 @@ def validate_runtime(config: Dict[str, Any], config_path: Path, paths: RuntimePa
         if not exists:
             warnings.append(f"{key} is false")
 
+    context_checks: List[Dict[str, Any]] = []
+    context_sources = config.get("context_sources", [])
+    if isinstance(context_sources, list):
+        for index, entry in enumerate(context_sources):
+            if not isinstance(entry, dict):
+                continue
+            name = str(entry.get("name", f"context_{index}")).strip()
+            path_pattern = str(entry.get("path", "")).strip()
+            if not path_pattern:
+                continue
+            matches = expand_context_paths(path_pattern, WORKSPACE_ROOT)
+            context_checks.append(
+                {
+                    "name": name,
+                    "path": path_pattern,
+                    "match_count": len(matches),
+                }
+            )
+            if not matches:
+                warnings.append(f"context source '{name}' matched no files: {path_pattern}")
+
     return {
         "status": "ok" if not errors else "error",
         "config_path": str(config_path),
@@ -1048,6 +1198,7 @@ def validate_runtime(config: Dict[str, Any], config_path: Path, paths: RuntimePa
         "schema_loaded": schema_available,
         "errors": errors,
         "warnings": warnings,
+        "context_checks": context_checks,
         "paths": {
             "intent_path": str(paths.intent_path),
             "reflect_path": str(paths.reflect_path),
@@ -1064,12 +1215,21 @@ def replay_run(run_id: str, paths: RuntimePaths) -> Dict[str, Any]:
     decisions = read_json(replay_dir / "decisions.json", default={})
     scores = read_json(replay_dir / "scores.json", default={})
     inputs = read_json(replay_dir / "inputs.json", default={})
+    config_hash_path = replay_dir / "config-hash.txt"
 
     if not decisions:
         return {
             "status": "error",
+            "error_code": "REPLAY_BUNDLE_MISSING",
             "message": f"Replay bundle missing: {replay_dir}",
             "run_id": run_id,
+            "actionable_errors": [
+                {
+                    "code": "REPLAY_BUNDLE_MISSING",
+                    "severity": "error",
+                    "message": f"Replay bundle missing or incomplete at {replay_dir}",
+                }
+            ],
         }
 
     routing = decisions.get("routing", {})
@@ -1093,14 +1253,30 @@ def replay_run(run_id: str, paths: RuntimePaths) -> Dict[str, Any]:
                 }
             )
 
+    status = "ok" if not mismatches else "error"
+    error_code = None if status == "ok" else "ROUTE_MISMATCH_DETECTED"
+
     return {
-        "status": "ok" if not mismatches else "error",
+        "status": status,
+        "error_code": error_code,
         "run_id": run_id,
         "bundle": str(replay_dir),
         "decision_count": len(decisions.get("decisions", [])),
         "mismatches": mismatches,
         "inputs_present": bool(inputs),
         "scores_present": bool(scores),
+        "config_hash_present": config_hash_path.exists(),
+        "context_sources_present": bool(inputs.get("context_sources")) and bool(scores.get("context_sources")),
+        "actionable_errors": [
+            {
+                "code": "ROUTE_MISMATCH_DETECTED",
+                "severity": "error",
+                "message": "Replay detected route mismatches; investigate routing thresholds or stale bundle data",
+                "details": {"mismatch_count": len(mismatches)},
+            }
+        ]
+        if mismatches
+        else [],
     }
 
 
@@ -1121,6 +1297,7 @@ def render_status_text(payload: Dict[str, Any]) -> str:
     health = payload.get("health", {})
     budget = payload.get("budget", {})
     queues = payload.get("queues", {})
+    actionable_errors = health.get("actionable_errors", [])
     lines = [
         f"status: {payload.get('status')}",
         f"budget remaining: GBP {budget.get('remaining_gbp', 0):.2f}",
@@ -1128,6 +1305,8 @@ def render_status_text(payload: Dict[str, Any]) -> str:
     ]
     if health.get("announce_failures"):
         lines.append(f"announce failures: {len(health['announce_failures'])}")
+    if actionable_errors:
+        lines.append(f"actionable errors: {len(actionable_errors)}")
     return "\n".join(lines)
 
 

@@ -12,18 +12,18 @@ Use this template for isolated cron runs that execute the Intention Engine in a 
 ## Commands
 
 ```bash
-bash ops/ie_deep.sh
-bash ops/ie_status.sh
+intention-engine --config config/runtime.json run --mode deep
+intention-engine --config config/runtime.json status --json
 ```
 
 ## Error Handling
 
-1. If `ops/ie_deep.sh` fails, retry once after 30 seconds.
+1. If the deep run command fails, retry once after 30 seconds.
 2. If second attempt fails, report:
    - exit code
    - error summary
    - whether budget file exists (`data/intention-engine-budget.json`)
-3. If `ops/ie_status.sh` shows announce failures in health, report as actionable.
+3. If status output shows announce failures in health, report as actionable.
 
 ## Output Rules
 

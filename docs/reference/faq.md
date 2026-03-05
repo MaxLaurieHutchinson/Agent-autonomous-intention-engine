@@ -23,7 +23,7 @@ Not as a first-class runtime module. It is planned as a future extension for str
 
 ## How does philosophy affect behavior?
 
-`PHILOSOPHY.md` text is tokenized together with `INTENT.md`; extracted keywords influence candidate relevance scoring.
+`PHILOSOPHY.md` is part of weighted `context_sources` used for keyword extraction. Combined context keywords influence candidate relevance scoring.
 
 ## What are proposals?
 

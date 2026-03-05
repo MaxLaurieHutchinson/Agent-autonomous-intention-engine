@@ -36,15 +36,18 @@ for job in jobs:
 
     if name == "IE Deep Run (Orchestrated)":
         payload["message"] = (
-            f"Run the Intention Engine deep loop from workspace root using canonical wrappers. "
-            f"Execute `bash {root_dir}/ops/ie_deep.sh`. If it fails, retry once after 30 seconds. "
-            f"Then run `bash {root_dir}/ops/ie_status.sh` and announce a concise summary including proposals_created, route breakdown, remaining budget, and any health issues."
+            f"Run the Intention Engine deep loop from workspace root using canonical CLI only. "
+            f"Execute `cd \"{root_dir}\" && intention-engine --config config/runtime.json run --mode deep`. "
+            f"If it fails, retry once after 30 seconds. "
+            f"Then run `cd \"{root_dir}\" && intention-engine --config config/runtime.json status --json` "
+            f"and announce a concise summary including proposals_created, route breakdown, remaining budget, and any health issues."
         )
         updated += 1
 
     if name == "IE Brief Generation (Orchestrated)":
         payload["message"] = (
-            f"Generate the IE morning brief from live runtime state. Execute `bash {root_dir}/ops/ie_status.sh` and parse the JSON. "
+            f"Generate the IE morning brief from live runtime state. "
+            f"Execute `cd \"{root_dir}\" && intention-engine --config config/runtime.json status --json` and parse the JSON. "
             f"Review `{root_dir}/memory/INTENT.md` and `{root_dir}/memory/proposals/inbox/` for active work. "
             f"Summarize budget, queue counts, last run, health issues, and items needing attention."
         )

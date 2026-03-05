@@ -8,26 +8,17 @@ It is designed for two realities at once:
 
 ## Core Contract
 
-Canonical runtime entrypoint:
+Install and use the canonical CLI:
 
 ```bash
-PYTHONPATH=./src python3 -m intention_engine_core.cli --config config/runtime.json run --mode <micro|deep|research_deep> [--dry-run]
+python3 -m pip install -e .
 ```
 
-Other commands:
-
 ```bash
-PYTHONPATH=./src python3 -m intention_engine_core.cli --config config/runtime.json status --json
-PYTHONPATH=./src python3 -m intention_engine_core.cli --config config/runtime.json validate --json
-PYTHONPATH=./src python3 -m intention_engine_core.cli --config config/runtime.json replay --run-id <run-id>
-```
-
-Wrapper commands:
-
-```bash
-bash ops/ie_micro.sh
-bash ops/ie_deep.sh
-bash ops/ie_status.sh
+intention-engine --config config/runtime.json run --mode <micro|deep|research_deep> [--dry-run]
+intention-engine --config config/runtime.json status --json
+intention-engine --config config/runtime.json validate --json
+intention-engine --config config/runtime.json replay --run-id <run-id>
 ```
 
 Workspace bootstrap:
@@ -41,7 +32,7 @@ bash ops/bootstrap-workspace.sh
 One run follows this sequence:
 
 1. Observe: pull candidates from configured sources.
-2. Orient: extract keywords from `memory/INTENT.md` plus philosophy text and score candidates.
+2. Orient: extract weighted keywords from context sources (INTENT, PHILOSOPHY, knowledge files) and score candidates.
 3. Decide: classify risk (`auto_safe`, `policy_guarded`, `human_gate`) and route (`approved`, `inbox`, `deferred`).
 4. Act: persist proposals and update budget state (unless `--dry-run`).
 5. Reflect: write replay bundle, metrics rollup, and a reflection entry.
@@ -65,23 +56,24 @@ Safe defaults in `config/runtime.json`:
 
 ## OpenClaw Scheduling Model
 
-- Heartbeat (workspace-level) should trigger micro checks and interruption-aware behavior.
+- Heartbeat (workspace-level) should trigger interruption-aware micro decisions.
 - Cron (isolated runs) should own fixed-time deep run and morning brief orchestration.
-- `cron/` contains prompt/templates.
-- `agents/cron/` contains executable job reconciliation scripts.
+- `cron/` contains prompts/templates.
+- `agents/cron/` contains executable reconciliation scripts.
 
 ## Documentation
 
 Read the full handbook at [docs/INDEX.md](docs/INDEX.md).
+Governance contract: [docs/governance/engineering-governance.md](docs/governance/engineering-governance.md).
 
 ## Fresh Clone Setup
 
 1. Bootstrap workspace state:
    - `bash ops/bootstrap-workspace.sh`
 2. Validate config and paths:
-   - `PYTHONPATH=./src python3 -m intention_engine_core.cli validate --json`
+   - `intention-engine --config config/runtime.json validate --json`
 3. Run a dry micro smoke:
-   - `bash ops/ie_micro.sh --dry-run`
+   - `intention-engine --config config/runtime.json run --mode micro --dry-run`
 
 ## Stability Status
 
@@ -89,6 +81,7 @@ Implemented now:
 - deterministic OODA-style run loop
 - risk-aware routing and guardrails
 - replayability and operational health surfaces
+- weighted context-source cognitive orientation
 
 Planned (not implemented as first-class runtime modules yet):
 - explicit BDI state model

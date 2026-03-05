@@ -97,6 +97,12 @@
         "type": "object"
       }
     },
+    "context_sources": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/contextSource"
+      }
+    },
     "routing": {
       "type": "object",
       "required": [
@@ -181,6 +187,28 @@
         }
       },
       "additionalProperties": true
+    },
+    "contextSource": {
+      "type": "object",
+      "required": [
+        "name",
+        "path"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "weight": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      },
+      "additionalProperties": false
     }
   },
   "additionalProperties": true

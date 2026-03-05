@@ -19,9 +19,9 @@ skip==0 {print}
 
 cat >> "${TMP}.clean" <<CRON
 $BLOCK_START
-*/30 * * * * $REPO_ROOT/ops/ie_micro.sh >> /tmp/intention-engine-micro.log 2>&1
-30 23 * * * $REPO_ROOT/ops/ie_deep.sh >> /tmp/intention-engine-deep.log 2>&1
-55 6 * * * $REPO_ROOT/ops/ie_status.sh >> /tmp/intention-engine-status.log 2>&1
+*/30 * * * * cd "$REPO_ROOT" && intention-engine --config config/runtime.json run --mode micro >> /tmp/intention-engine-micro.log 2>&1
+30 23 * * * cd "$REPO_ROOT" && intention-engine --config config/runtime.json run --mode deep >> /tmp/intention-engine-deep.log 2>&1
+55 6 * * * cd "$REPO_ROOT" && intention-engine --config config/runtime.json status --json >> /tmp/intention-engine-status.log 2>&1
 $BLOCK_END
 CRON
 

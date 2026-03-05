@@ -33,6 +33,9 @@ reflect_path = resolve_config_path("reflect_path", "memory/REFLECT.md")
 proposals_dir = resolve_config_path("proposals_dir", "memory/proposals")
 metrics_dir = resolve_config_path("metrics_dir", "memory/metrics")
 briefings_dir = resolve_config_path("briefings_dir", "memory/briefings")
+knowledge_frameworks_dir = root_dir / "memory" / "knowledge" / "frameworks"
+knowledge_patterns_dir = root_dir / "memory" / "knowledge" / "patterns"
+knowledge_insights_dir = root_dir / "memory" / "knowledge" / "insights"
 lock_path = resolve_config_path("lock_path", "memory/metrics/intention-engine.lock")
 budget_state_path = resolve_config_path("budget_state_path", "data/intention-engine-budget.json")
 replay_dir = resolve_config_path("replay_dir", "data/intention-engine-runs")
@@ -50,6 +53,9 @@ for directory in (
     proposals_dir / "rejected",
     metrics_dir,
     briefings_dir,
+    knowledge_frameworks_dir,
+    knowledge_patterns_dir,
+    knowledge_insights_dir,
     lock_path.parent,
     budget_state_path.parent,
     replay_dir,

@@ -41,7 +41,33 @@
     "replay_dir": "data/intention-engine-runs",
     "cron_jobs_path": "~/.openclaw/cron/jobs.json"
   },
-  "idle_threshold_minutes": 5,
+  "context_sources": [
+    {
+      "name": "intent",
+      "path": "memory/INTENT.md",
+      "weight": 1.4
+    },
+    {
+      "name": "philosophy",
+      "path": "memory/PHILOSOPHY.md",
+      "weight": 1.2
+    },
+    {
+      "name": "knowledge_frameworks",
+      "path": "memory/knowledge/frameworks/*.md",
+      "weight": 1.0
+    },
+    {
+      "name": "knowledge_patterns",
+      "path": "memory/knowledge/patterns/*.md",
+      "weight": 1.1
+    },
+    {
+      "name": "knowledge_insights",
+      "path": "memory/knowledge/insights/*.md",
+      "weight": 0.9
+    }
+  ],
   "sources": [
     {
       "type": "hackernews",
@@ -98,20 +124,5 @@
       "post",
       "publish"
     ]
-  },
-  "intake": {
-    "default_saga_id": "S02",
-    "default_chapter_id": "C06",
-    "default_intent_status": "NEXT",
-    "auto_insert_intentions": false
-  },
-  "external_action_keywords": [
-    "send",
-    "post",
-    "tweet",
-    "email",
-    "publish",
-    "deploy",
-    "release"
-  ]
+  }
 }

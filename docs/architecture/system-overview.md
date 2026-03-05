@@ -16,7 +16,7 @@ This document describes the implementation that exists today in `src/intention_e
 | CLI | `src/intention_engine_core/cli.py` + `runtime.py` | command parsing and execution (`run`, `status`, `validate`, `replay`) |
 | Path Resolver | `src/intention_engine_core/path_resolver.py` | expands `~`, resolves relative paths against workspace root |
 | Discovery | `discover_candidates()` | fetches candidate opportunities from configured sources |
-| Scoring | `extract_keywords()` + `score_candidate()` | calculates relevance/value/urgency/effort/risk score |
+| Scoring | `extract_keywords()` + `score_candidate()` | calculates weighted context relevance plus value/urgency/effort/risk score |
 | Risk & Routing | `classify_risk()` + `route_from_values()` | enforces autonomy class and destination queue |
 | Persistence | proposal markdown + budget state + metrics + reflection | makes decisions and outcomes durable |
 | Replay | `write_replay_bundle()` + `replay_run()` | deterministic post-hoc verification |
@@ -30,7 +30,7 @@ flowchart TD
     B --> C[Acquire file lock]
     C --> D[Load budget state]
     D --> E[Discover candidates]
-    E --> F[Extract intent+philosophy keywords]
+    E --> F[Extract weighted context keywords]
     F --> G[Score candidates]
     G --> H[Classify risk and route]
     H --> I[Persist proposals by route]
@@ -78,5 +78,6 @@ Every run writes:
 ## Operational Boundaries
 
 - Heartbeat behavior is workspace-level in OpenClaw and is not implemented in this repository.
-- This repo provides wrappers and cron support artifacts used by heartbeat/isolated jobs.
+- This repo provides canonical CLI and cron support artifacts used by heartbeat/isolated jobs.
 - External posting/actions are not executed by this runtime; outputs are local state artifacts.
+- Canonical operational entrypoint is the `intention-engine` executable.

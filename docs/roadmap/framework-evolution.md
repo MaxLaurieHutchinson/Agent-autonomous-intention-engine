@@ -4,7 +4,7 @@ This roadmap extends the current runtime without breaking its deterministic/file
 
 ## Principles for Evolution
 
-- preserve current CLI and wrapper contracts
+- preserve current CLI contract
 - keep replay determinism measurable
 - add capabilities behind explicit config toggles
 - avoid hidden autonomous behavior shifts
