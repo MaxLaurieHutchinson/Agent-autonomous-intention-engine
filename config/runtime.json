@@ -70,27 +70,109 @@
   ],
   "sources": [
     {
+      "id": "hn-top-ai",
       "type": "hackernews",
       "name": "Hacker News",
-      "limit": 20
+      "enabled": true,
+      "limit": 20,
+      "timeout_s": 10,
+      "filters": {
+        "max_age_hours": 120,
+        "exclude_keywords": [
+          "sports",
+          "politics"
+        ]
+      }
     },
     {
+      "id": "reddit-localllama",
       "type": "reddit",
       "subreddit": "LocalLLaMA",
       "name": "LocalLLaMA",
-      "limit": 10
+      "enabled": true,
+      "limit": 10,
+      "timeout_s": 10,
+      "filters": {
+        "max_age_hours": 168
+      }
     },
     {
+      "id": "reddit-machinelearning",
       "type": "reddit",
       "subreddit": "MachineLearning",
       "name": "MachineLearning",
-      "limit": 10
+      "enabled": true,
+      "limit": 10,
+      "timeout_s": 10,
+      "filters": {
+        "max_age_hours": 168,
+        "include_keywords": [
+          "agent",
+          "llm",
+          "benchmark",
+          "mcp",
+          "inference"
+        ]
+      }
     },
     {
+      "id": "github-agentic-ai",
       "type": "github",
       "query": "agentic ai LLM",
       "name": "GitHub Agentic AI",
-      "limit": 10
+      "enabled": true,
+      "limit": 10,
+      "timeout_s": 10,
+      "filters": {
+        "min_engagement": 5,
+        "exclude_keywords": [
+          "awesome-list"
+        ]
+      }
+    },
+    {
+      "id": "rss-aifeed",
+      "type": "rss",
+      "name": "AIFeed",
+      "feed_url": "https://aifeed.dev/feed.xml",
+      "enabled": true,
+      "limit": 25,
+      "timeout_s": 10,
+      "filters": {
+        "max_age_hours": 168,
+        "include_keywords": [
+          "agent",
+          "model",
+          "llm",
+          "openai",
+          "anthropic",
+          "mcp"
+        ]
+      }
+    },
+    {
+      "id": "arxiv-core-ai",
+      "type": "arxiv",
+      "name": "arXiv Core AI",
+      "categories": [
+        "cs.AI",
+        "cs.LG",
+        "cs.CL",
+        "cs.CV"
+      ],
+      "enabled": true,
+      "limit": 20,
+      "timeout_s": 12,
+      "filters": {
+        "max_age_hours": 336,
+        "include_keywords": [
+          "agent",
+          "reasoning",
+          "rl",
+          "llm",
+          "benchmark"
+        ]
+      }
     }
   ],
   "routing": {

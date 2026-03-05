@@ -1,0 +1,99 @@
+[
+  {
+    "id": "rss-openai-blog",
+    "type": "rss",
+    "name": "OpenAI News",
+    "feed_url": "https://openai.com/news/rss.xml",
+    "enabled": false,
+    "limit": 20,
+    "timeout_s": 10,
+    "filters": {
+      "max_age_hours": 336,
+      "include_keywords": ["model", "agent", "api", "safety"]
+    }
+  },
+  {
+    "id": "rss-google-ai-blog",
+    "type": "rss",
+    "name": "Google AI Blog",
+    "feed_url": "http://googleaiblog.blogspot.com/atom.xml",
+    "enabled": false,
+    "limit": 20,
+    "timeout_s": 10
+  },
+  {
+    "id": "rss-huggingface-blog",
+    "type": "rss",
+    "name": "Hugging Face Blog",
+    "feed_url": "https://huggingface.co/blog/feed.xml",
+    "enabled": false,
+    "limit": 20,
+    "timeout_s": 10
+  },
+  {
+    "id": "rss-eleuther-blog",
+    "type": "rss",
+    "name": "EleutherAI Blog",
+    "feed_url": "https://blog.eleuther.ai/index.xml",
+    "enabled": false,
+    "limit": 15,
+    "timeout_s": 10
+  },
+  {
+    "id": "rss-langchain-blog",
+    "type": "rss",
+    "name": "LangChain Blog",
+    "feed_url": "https://blog.langchain.dev/rss/",
+    "enabled": false,
+    "limit": 15,
+    "timeout_s": 10
+  },
+  {
+    "id": "rss-arstechnica-ai",
+    "type": "rss",
+    "name": "Ars Technica",
+    "feed_url": "https://feeds.arstechnica.com/arstechnica/index",
+    "enabled": false,
+    "limit": 20,
+    "timeout_s": 10,
+    "filters": {
+      "include_keywords": ["ai", "agent", "model", "llm"]
+    }
+  },
+  {
+    "id": "rss-venturebeat-ai",
+    "type": "rss",
+    "name": "VentureBeat AI",
+    "feed_url": "https://venturebeat.com/category/ai/feed/",
+    "enabled": false,
+    "limit": 20,
+    "timeout_s": 10
+  },
+  {
+    "id": "rss-wired-ai",
+    "type": "rss",
+    "name": "Wired AI",
+    "feed_url": "https://www.wired.com/feed/tag/ai/latest/rss",
+    "enabled": false,
+    "limit": 20,
+    "timeout_s": 10
+  },
+  {
+    "id": "rss-technologyreview",
+    "type": "rss",
+    "name": "MIT Technology Review",
+    "feed_url": "https://www.technologyreview.com/feed/",
+    "enabled": false,
+    "limit": 20,
+    "timeout_s": 10
+  },
+  {
+    "id": "rss-lastweekinai",
+    "type": "rss",
+    "name": "Last Week in AI",
+    "feed_url": "https://lastweekin.ai/feed",
+    "enabled": false,
+    "limit": 15,
+    "timeout_s": 10
+  }
+]
