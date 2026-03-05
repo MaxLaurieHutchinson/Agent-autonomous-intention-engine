@@ -1,52 +1,95 @@
-# Intention Engine Unified
+# Intention Engine
 
-Single project to unify DayDream, Ash Time, Intention philosophy, and The Intention Engine into one autonomous operating system.
+Intention Engine is a deterministic, file-first autonomous decision loop for discovering work, routing risk, and producing auditable outputs.
 
-## Mission
-Build a proactive agent system that:
-- Learns continuously
-- Creates useful outputs without waiting for prompts
-- Scans trends and surfaces what is up-and-coming
-- Converts discoveries into narrative-aligned execution
+It is designed for two realities at once:
+- operator-first use in an OpenClaw workspace
+- clean packaging and documentation for public reuse
 
-## Constitution
-Source of truth for "why":
-- `philosophy/PHILOSOPHY.md`
+## Core Contract
 
-This document is the constitutional layer. All planning, proposals, and automation are filtered through it.
+Canonical runtime entrypoint:
 
-## Unified Name
-Use one name everywhere:
-- `Intention Engine` (canonical)
+```bash
+PYTHONPATH=./src python3 -m intention_engine_core.cli --config config/runtime.json run --mode <micro|deep|research_deep> [--dry-run]
+```
 
-Retire competing labels as product names (`DayDream`, `Ash Time`) and keep them as internal module names only.
+Other commands:
 
-## What This Pack Contains
-- `01-PROJECT-AUDIT.md` - What each existing project contributes
-- `02-UNIFIED-ARCHITECTURE.md` - End-to-end system design
-- `03-AUTONOMY-OPERATING-MODEL.md` - Fully autonomous and proactive runtime model
-- `04-MIGRATION-PLAN.md` - Step-by-step consolidation plan
-- `05-IMPLEMENTATION-BACKLOG.md` - Immediate executable backlog in saga format
-- `06-ASH-TIME-V3-NORMALIZATION.md` - Normalize and preserve best parts of current Ash Time v3 prompt
-- `07-CLAW-TIME-V04-IDEA-TRIAGE.md` - Keep/simplify/drop review of CLAW TIME v0.4 concepts
-- `08-BUILD-RUNBOOK.md` - Commands and scheduling to run the system in full-auto mode
-- `09-IMPLEMENTATION-STATUS.md` - Runtime build status, validation, and known constraints
-- `CHANGELOG.md` - Version history
-- `10-ASH-OPERATOR-PROMPT.md` - Ready-to-use Ash operator prompt for learning and running Intention Engine
+```bash
+PYTHONPATH=./src python3 -m intention_engine_core.cli --config config/runtime.json status --json
+PYTHONPATH=./src python3 -m intention_engine_core.cli --config config/runtime.json validate --json
+PYTHONPATH=./src python3 -m intention_engine_core.cli --config config/runtime.json replay --run-id <run-id>
+```
 
-## Design Principles
-- Narrative first: every task must tie to a saga/chapter
-- OODA always: Observe, Orient, Decide, Act as the core loop
-- Files over frameworks: markdown + deterministic automations
-- Autonomy by policy: no per-action micromanagement for safe classes
-- Evidence over claims: outputs must be traceable and verifiable
+Wrapper commands:
 
-## Target State
-One coherent loop:
-1. Scout discovers trends
-2. OODA filter aligns discoveries to philosophy + active sagas
-3. Engine auto-converts high-signal items into intentions
-4. Workers execute proactively
-5. Reflector captures outcomes and updates knowledge
+```bash
+bash ops/ie_micro.sh
+bash ops/ie_deep.sh
+bash ops/ie_status.sh
+```
 
-Status: standalone repo package v1.0 (2026-02-22)
+Workspace bootstrap:
+
+```bash
+bash ops/bootstrap-workspace.sh
+```
+
+## How It Works
+
+One run follows this sequence:
+
+1. Observe: pull candidates from configured sources.
+2. Orient: extract keywords from `memory/INTENT.md` plus philosophy text and score candidates.
+3. Decide: classify risk (`auto_safe`, `policy_guarded`, `human_gate`) and route (`approved`, `inbox`, `deferred`).
+4. Act: persist proposals and update budget state (unless `--dry-run`).
+5. Reflect: write replay bundle, metrics rollup, and a reflection entry.
+
+## Runtime Artifacts
+
+- proposals: `memory/proposals/{approved,inbox,deferred,rejected}`
+- budget state: `data/intention-engine-budget.json`
+- replay bundles: `data/intention-engine-runs/<run-id>/`
+- metrics: `memory/metrics/intention-engine-YYYY-MM-DD.json`
+- logs: `logs/engine.jsonl`
+- reflections: `memory/REFLECT.md`
+
+## Philosophy and Safety
+
+`philosophy/PHILOSOPHY.md` (or configured `memory/PHILOSOPHY.md`) is actively used in scoring through keyword extraction.
+
+Safe defaults in `config/runtime.json`:
+- `allow_policy_guarded_auto = false`
+- `research_deep.enabled = false`
+
+## OpenClaw Scheduling Model
+
+- Heartbeat (workspace-level) should trigger micro checks and interruption-aware behavior.
+- Cron (isolated runs) should own fixed-time deep run and morning brief orchestration.
+- `cron/` contains prompt/templates.
+- `agents/cron/` contains executable job reconciliation scripts.
+
+## Documentation
+
+Read the full handbook at [docs/INDEX.md](docs/INDEX.md).
+
+## Fresh Clone Setup
+
+1. Bootstrap workspace state:
+   - `bash ops/bootstrap-workspace.sh`
+2. Validate config and paths:
+   - `PYTHONPATH=./src python3 -m intention_engine_core.cli validate --json`
+3. Run a dry micro smoke:
+   - `bash ops/ie_micro.sh --dry-run`
+
+## Stability Status
+
+Implemented now:
+- deterministic OODA-style run loop
+- risk-aware routing and guardrails
+- replayability and operational health surfaces
+
+Planned (not implemented as first-class runtime modules yet):
+- explicit BDI state model
+- Rubber Duck multi-agent reasoning loops
