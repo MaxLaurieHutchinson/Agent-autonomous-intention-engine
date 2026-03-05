@@ -30,6 +30,12 @@ bash ops/ie_deep.sh
 bash ops/ie_status.sh
 ```
 
+Workspace bootstrap:
+
+```bash
+bash ops/bootstrap-workspace.sh
+```
+
 ## How It Works
 
 One run follows this sequence:
@@ -67,6 +73,15 @@ Safe defaults in `config/runtime.json`:
 ## Documentation
 
 Read the full handbook at [docs/INDEX.md](docs/INDEX.md).
+
+## Fresh Clone Setup
+
+1. Bootstrap workspace state:
+   - `bash ops/bootstrap-workspace.sh`
+2. Validate config and paths:
+   - `PYTHONPATH=./src python3 -m intention_engine_core.cli validate --json`
+3. Run a dry micro smoke:
+   - `bash ops/ie_micro.sh --dry-run`
 
 ## Stability Status
 
