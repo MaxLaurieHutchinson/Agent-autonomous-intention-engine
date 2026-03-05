@@ -13,6 +13,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -22,6 +24,9 @@ jobs:
       - name: Compile runtime
         run: |
           python -m compileall -q src/intention_engine_core
+
+      - name: Validate sub-agent repertoire
+        run: python scripts/validate_subagent_repertoire.py
 
       - name: Bootstrap workspace
         run: bash ops/bootstrap-workspace.sh
