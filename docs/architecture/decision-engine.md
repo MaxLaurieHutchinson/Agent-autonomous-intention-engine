@@ -5,7 +5,7 @@ This document defines the scoring, risk, and routing behavior implemented in `ru
 ## Inputs
 
 For each run, the engine ingests:
-- candidates from configured discovery sources
+- candidates from configured discovery adapters (after per-source filters and canonical dedupe)
 - keywords extracted from `INTENT` and `PHILOSOPHY`
 - routing thresholds and keyword lists from config
 - mode profile constraints (`max_items`, `max_run_cost`, `enabled`)
@@ -80,11 +80,12 @@ Per-run bundle includes:
 - computed scores (`scores.json`)
 - chosen decisions and routing config (`decisions.json`)
 - config hash (`config-hash.txt`)
+- source provenance (`source_stats`, `dedupe_stats`)
 
 `replay` recomputes route per decision and reports mismatches.
 
 ## Failure Surfaces
 
-- Discovery errors are captured in run summary and logged (`discovery_error`).
+- Discovery errors are captured as structured source errors in run summary and logs (`discovery_error`).
 - Unhandled runtime exceptions are logged (`unhandled_exception`) and returned as error JSON.
-- Status degrades when config errors, announce failures, or recent error logs are present.
+- Status degrades when config errors, source errors, announce failures, or recent error logs are present.

@@ -1,5 +1,30 @@
 # Changelog
 
+## v2.3.0 - 2026-03-05 (dev)
+- Refactored discovery into pluggable source adapters under `src/intention_engine_core/sources/`.
+- Added non-auth source types:
+  - `rss`
+  - `arxiv`
+- Kept existing adapters:
+  - `reddit`
+  - `hackernews`
+  - `github`
+  - `fixture`
+- Expanded source config contract with typed entries and common fields:
+  - `id`, `name`, `type`, `enabled`, `limit`, `timeout_s`, `filters`
+- Added per-source deterministic filters:
+  - `min_engagement`, `max_age_hours`, `include_keywords`, `exclude_keywords`, `domain_allowlist`, `domain_blocklist`
+- Added deterministic canonical URL + title-fingerprint dedupe in discovery pipeline.
+- Added source provenance into replay artifacts:
+  - `source_stats`, `dedupe_stats`, candidate canonical metadata
+- Expanded status health with source error surfaces (`DISCOVERY_SOURCE_ERRORS_PRESENT`).
+- Added curated RSS seed set:
+  - `config/sources/rss_seed_curated.json`
+- Added new docs:
+  - `docs/architecture/source-adapters.md`
+  - `docs/operations/source-onboarding.md`
+- Added source-focused tests and CI compile coverage for the new adapter package.
+
 ## v2.2.0 - 2026-03-05 (dev)
 - Locked canonical runtime contract to installable CLI only:
   - added `project.scripts` entrypoint `intention-engine`
