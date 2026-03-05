@@ -1,98 +1,73 @@
 # Operations Runbook
 
-This runbook is for operating the current `dev` runtime safely.
-
 ## Prerequisites
 
-- Python 3.9+
-- repo root as working directory
-- `config/runtime.json` present
+1. Install package locally:
 
-## Baseline Validation
+```bash
+python3 -m pip install -e .
+```
 
-Bootstrap workspace files and directories first:
+2. Bootstrap workspace state:
 
 ```bash
 bash ops/bootstrap-workspace.sh
 ```
 
-Then run:
+## Validation
 
 ```bash
-PYTHONPATH=./src python3 -m intention_engine_core.cli validate --json
-python3 -m unittest discover -s tests -v
+intention-engine --config config/runtime.json validate --json
 ```
 
 Expected:
-- tests pass
-- validate returns `status: ok` (warnings are acceptable and should be reviewed)
+- `status: ok`
+- warnings allowed for intentionally missing optional context files
 
-## Core Commands
+## Manual Runtime Commands
 
-Micro run:
-
-```bash
-bash ops/ie_micro.sh
-```
-
-Deep run:
+### Micro dry-run smoke
 
 ```bash
-bash ops/ie_deep.sh
+intention-engine --config config/runtime.json run --mode micro --dry-run
 ```
 
-Status:
+### Deep run
 
 ```bash
-bash ops/ie_status.sh
+intention-engine --config config/runtime.json run --mode deep
 ```
 
-Replay:
+### Status snapshot
 
 ```bash
-PYTHONPATH=./src python3 -m intention_engine_core.cli replay --run-id <run-id>
+intention-engine --config config/runtime.json status --json
 ```
 
-## Dry-Run Safety Mode
+### Replay verification
 
 ```bash
-bash ops/ie_micro.sh --dry-run
+intention-engine --config config/runtime.json replay --run-id <run-id>
 ```
-
-Dry run does not mutate budget/proposals/metrics/reflect, but still exercises discovery, scoring, routing, and replay artifact writes.
 
 ## Troubleshooting
 
-### `status: degraded`
-Check in order:
-1. `health.validation_errors`
-2. `health.announce_failures`
-3. `health.recent_log_errors_24h`
-
-### Discovery failures
-- Inspect latest `discovery_error` events in `logs/engine.jsonl`.
-- Network/API failures are expected to degrade source coverage but not crash full run by default.
-
-### Budget blocked
-- Runtime returns `status: budget_blocked` with `remaining_gbp` and `required_gbp`.
-- Wait for daily rollover or adjust `mode_profiles` / budget config.
+### Validate failures
+- run `validate --json` and fix listed errors first
+- confirm config matches `config/runtime.schema.json`
 
 ### Replay mismatch
-- If replay returns mismatches, treat as determinism regression and investigate routing/config drift.
+- if replay returns `error_code=ROUTE_MISMATCH_DETECTED`, treat as determinism regression
+- inspect replay bundle (`inputs.json`, `scores.json`, `decisions.json`, `config-hash.txt`)
+- compare routing thresholds and context sources used in that run
 
-## Cron Installer (OS cron)
+### Announce failures
+- if `status --json` reports actionable announce errors, check `~/.openclaw/cron/jobs.json`
+- inspect failed job state and fix delivery configuration
 
-For local cron block installation:
+## Operational Checkpoints
 
-```bash
-bash ops/install-cron.sh
-```
-
-This manages a marker block and schedules canonical wrappers only.
-
-## Operational Smoke Checklist
-
-1. `validate --json` is `ok`.
-2. `ie_micro.sh --dry-run` exits 0.
-3. `ie_status.sh` returns parseable JSON.
-4. one non-dry micro run updates budget and metrics.
+1. `intention-engine --config config/runtime.json validate --json` returns `ok`.
+2. `intention-engine --config config/runtime.json run --mode micro --dry-run` exits `0`.
+3. `intention-engine --config config/runtime.json status --json` returns parseable JSON.
+4. Replay works for the latest run ID.

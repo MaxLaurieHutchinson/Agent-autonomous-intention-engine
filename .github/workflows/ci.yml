@@ -39,10 +39,17 @@ jobs:
         run: python -m unittest discover -s tests -v
 
       - name: Validate config
-        run: PYTHONPATH=src python -m intention_engine_core.cli validate --json
+        run: intention-engine --config config/runtime.json validate --json
 
       - name: Dry-run micro loop
-        run: bash ops/ie_micro.sh --dry-run
+        run: intention-engine --config config/runtime.json run --mode micro --dry-run
 
       - name: Status smoke
-        run: bash ops/ie_status.sh
+        run: intention-engine --config config/runtime.json status --json
+
+      - name: Enforce no-wrapper references in active contract docs/tests/cron/ci
+        run: |
+          if rg -n "ops/ie_(micro|deep|status)\\.sh" README.md docs/operations docs/reference cron agents tests .github/workflows/ci.yml; then
+            echo "Found wrapper references in active contract surfaces."
+            exit 1
+          fi

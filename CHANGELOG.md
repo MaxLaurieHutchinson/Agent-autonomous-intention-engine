@@ -1,5 +1,25 @@
 # Changelog
 
+## v2.2.0 - 2026-03-05 (dev)
+- Locked canonical runtime contract to installable CLI only:
+  - added `project.scripts` entrypoint `intention-engine`
+  - removed operational wrappers `ops/ie_micro.sh`, `ops/ie_deep.sh`, `ops/ie_status.sh`
+- Updated active docs/cron/tests/CI to canonical CLI commands only.
+- Added CI enforcement for no wrapper references in active contract surfaces.
+- Config/runtime hygiene:
+  - removed deprecated fields from default config (`idle_threshold_minutes`, `intake`, `external_action_keywords`)
+  - runtime validation now rejects deprecated fields explicitly
+  - added `context_sources` config with weighted deterministic context ingestion
+- Cognitive integration:
+  - `extract_keywords` now consumes ordered/weighted context sources with deterministic glob expansion
+  - replay artifacts persist context source metadata
+- Operability hardening:
+  - status now emits failure taxonomy and actionable errors
+  - replay now emits explicit error codes and mismatch actionability
+- Added governance docs:
+  - `docs/governance/engineering-governance.md`
+  - `docs/governance/experiment-protocol.md`
+
 ## v2.1.4 - 2026-03-05 (dev)
 - Hardened CI for release-readiness:
   - added `ops/bootstrap-workspace.sh` execution in CI to initialize expected runtime files and directories

@@ -29,6 +29,10 @@ If you want to tune behavior:
 If you want the roadmap:
 - [Framework Evolution (BDI + Rubber Duck)](roadmap/framework-evolution.md)
 
+If you want governance and operating rules:
+- [Engineering Governance (Normative)](governance/engineering-governance.md)
+- [Experiment Protocol](governance/experiment-protocol.md)
+
 ## Structure
 
 - `docs/architecture/` implementation architecture and cognitive model boundaries
@@ -37,4 +41,5 @@ If you want the roadmap:
 - `docs/operations/` real operational procedures for OpenClaw and scheduler integration
 - `docs/reference/` command-level and operator Q&A references
 - `docs/roadmap/` forward design that preserves current contracts
+- `docs/governance/` hard engineering and experiment governance rules
 - `docs/archive/v2.1-notes/` historical numbered notes pack

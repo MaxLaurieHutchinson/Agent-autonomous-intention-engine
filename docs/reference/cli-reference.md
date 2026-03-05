@@ -1,82 +1,79 @@
 # CLI Reference
 
-Primary entrypoint:
+Canonical command:
 
 ```bash
-PYTHONPATH=./src python3 -m intention_engine_core.cli
+intention-engine --config config/runtime.json
 ```
-
-Global option:
-- `--config <path>`: path to runtime config JSON
 
 ## Commands
 
 ### `run`
 
 ```bash
-PYTHONPATH=./src python3 -m intention_engine_core.cli --config config/runtime.json run --mode <micro|deep|research_deep> [--dry-run]
+intention-engine --config config/runtime.json run --mode <micro|deep|research_deep> [--dry-run]
 ```
 
 Behavior:
-- validates mode profile exists and is enabled
-- enforces budget gate unless `--dry-run`
-- discovers/scores/routes candidates
+- enforces mode profile constraints and budget policy
 - writes replay bundle always
-- writes budget/proposals/metrics/reflect only on non-dry runs
+- writes proposals/metrics/reflect only when not `--dry-run`
 
 Common statuses:
 - `ok`
 - `dry_run`
+- `budget_blocked`
 - `mode_disabled`
 - `invalid_mode`
-- `budget_blocked`
 
 ### `status`
 
 ```bash
-PYTHONPATH=./src python3 -m intention_engine_core.cli --config config/runtime.json status --json
+intention-engine --config config/runtime.json status --json
 ```
 
 Returns:
-- `status` (`ok` or `degraded`)
-- `budget`
-- `queues`
-- `last_run`
-- `health` (`validation_*`, `announce_failures`, `recent_log_errors_24h`)
+- budget summary
+- queue counts
+- last run snapshot
+- health checks (validation, announce failures, recent runtime errors)
+- failure taxonomy and actionable errors
 
 ### `validate`
 
 ```bash
-PYTHONPATH=./src python3 -m intention_engine_core.cli --config config/runtime.json validate --json
+intention-engine --config config/runtime.json validate --json
 ```
 
 Checks:
-- config structural requirements
-- key path existence warnings
-- schema presence
+- config structure and required fields
+- schema availability
+- critical path existence
+- context source match counts
+
+Exit behavior:
+- `0` when `status=ok`
+- `1` when validation errors exist
 
 ### `replay`
 
 ```bash
-PYTHONPATH=./src python3 -m intention_engine_core.cli --config config/runtime.json replay --run-id <run-id>
+intention-engine --config config/runtime.json replay --run-id <run-id>
 ```
 
 Verifies deterministic route reproduction from replay artifacts.
 
+Exit behavior:
+- `0`: no mismatches
+- `1`: runtime/config/replay failure or mismatch detected
+
 ## Exit Codes
 
 - `0`: success
-- `1`: runtime/config/replay failure
-- `2`: parser/usage error
+- `1`: domain/runtime validation error
+- `2`: parser/argument error
 
-## Wrapper Commands
+## Notes
 
-For operators, preferred wrappers are:
-
-```bash
-bash ops/ie_micro.sh
-bash ops/ie_deep.sh
-bash ops/ie_status.sh
-```
-
-They inject `PYTHONPATH` and default config path for repo-root execution.
+- There is no wrapper command contract in this phase.
+- Use the canonical `intention-engine` executable for local, cron, and heartbeat integration.

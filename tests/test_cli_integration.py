@@ -1,12 +1,9 @@
 import json
-import os
+import shutil
 import subprocess
-import sys
 import tempfile
 import unittest
 from pathlib import Path
-
-MODULE_ROOT = Path(__file__).resolve().parents[1]
 
 
 class CliIntegrationTests(unittest.TestCase):
@@ -18,6 +15,21 @@ class CliIntegrationTests(unittest.TestCase):
         self.memory_dir.mkdir(parents=True, exist_ok=True)
         (self.memory_dir / "INTENT.md").write_text("# Intent\nFocus on reliable Python tooling\n", encoding="utf-8")
         (self.memory_dir / "PHILOSOPHY.md").write_text("# Philosophy\nHuman gate for sensitive work\n", encoding="utf-8")
+
+        self.knowledge_dir = self.memory_dir / "knowledge"
+        (self.knowledge_dir / "frameworks").mkdir(parents=True, exist_ok=True)
+        (self.knowledge_dir / "patterns").mkdir(parents=True, exist_ok=True)
+        (self.knowledge_dir / "insights").mkdir(parents=True, exist_ok=True)
+
+        (self.knowledge_dir / "frameworks" / "f1.md").write_text(
+            "OODA observe orient decide act workflow architecture", encoding="utf-8"
+        )
+        (self.knowledge_dir / "patterns" / "p1.md").write_text(
+            "deterministic replayability guardrails evidence", encoding="utf-8"
+        )
+        (self.knowledge_dir / "insights" / "i1.md").write_text(
+            "agent infrastructure trend risk controls", encoding="utf-8"
+        )
 
         self.proposals_dir = self.memory_dir / "proposals"
         self.metrics_dir = self.memory_dir / "metrics"
@@ -88,6 +100,25 @@ class CliIntegrationTests(unittest.TestCase):
                         "replay_dir": str(self.replay_dir),
                         "cron_jobs_path": str(self.cron_jobs_path),
                     },
+                    "context_sources": [
+                        {"name": "intent", "path": str(self.memory_dir / "INTENT.md"), "weight": 1.3},
+                        {"name": "philosophy", "path": str(self.memory_dir / "PHILOSOPHY.md"), "weight": 1.2},
+                        {
+                            "name": "knowledge_patterns",
+                            "path": str(self.knowledge_dir / "patterns" / "*.md"),
+                            "weight": 1.1,
+                        },
+                        {
+                            "name": "knowledge_frameworks",
+                            "path": str(self.knowledge_dir / "frameworks" / "*.md"),
+                            "weight": 1.0,
+                        },
+                        {
+                            "name": "knowledge_insights",
+                            "path": str(self.knowledge_dir / "insights" / "*.md"),
+                            "weight": 0.9,
+                        },
+                    ],
                     "sources": [
                         {
                             "type": "fixture",
@@ -127,11 +158,11 @@ class CliIntegrationTests(unittest.TestCase):
         self.temp_dir_obj.cleanup()
 
     def run_cli(self, args):
-        env = dict(**os.environ)
-        src_path = str(MODULE_ROOT / "src")
-        env["PYTHONPATH"] = f"{src_path}:{env['PYTHONPATH']}" if env.get("PYTHONPATH") else src_path
-        cmd = [sys.executable, "-m", "intention_engine_core.cli", "--config", str(self.config_path)] + list(args)
-        return subprocess.run(cmd, capture_output=True, text=True, check=False, env=env)
+        cli_bin = shutil.which("intention-engine")
+        if not cli_bin:
+            self.fail("intention-engine executable not found in PATH; run `python3 -m pip install -e .`")
+        cmd = [cli_bin, "--config", str(self.config_path)] + list(args)
+        return subprocess.run(cmd, capture_output=True, text=True, check=False)
 
     def parse_stdout_json(self, completed: subprocess.CompletedProcess):
         self.assertNotEqual(completed.stdout.strip(), "", msg=completed.stderr)
@@ -153,6 +184,11 @@ class CliIntegrationTests(unittest.TestCase):
         self.assertTrue((bundle / "config-hash.txt").exists())
         self.assertTrue((self.data_dir / "intention-engine-budget.json").exists())
 
+        inputs_payload = json.loads((bundle / "inputs.json").read_text(encoding="utf-8"))
+        scores_payload = json.loads((bundle / "scores.json").read_text(encoding="utf-8"))
+        self.assertGreaterEqual(len(inputs_payload.get("context_sources", [])), 3)
+        self.assertGreaterEqual(len(scores_payload.get("context_sources", [])), 3)
+
     def test_status_json_contains_contract_fields(self) -> None:
         self.run_cli(["run", "--mode", "micro"])
         completed = self.run_cli(["status", "--json"])
@@ -163,7 +199,9 @@ class CliIntegrationTests(unittest.TestCase):
         self.assertIn("queues", payload)
         self.assertIn("last_run", payload)
         self.assertIn("health", payload)
+        self.assertIn("failure_taxonomy", payload["health"])
         self.assertGreaterEqual(len(payload["health"]["announce_failures"]), 1)
+        self.assertGreaterEqual(len(payload["health"]["actionable_errors"]), 1)
 
     def test_replay_reproduces_route_decisions(self) -> None:
         run = self.run_cli(["run", "--mode", "micro"])
@@ -175,6 +213,25 @@ class CliIntegrationTests(unittest.TestCase):
 
         self.assertEqual(replay_payload["status"], "ok")
         self.assertEqual(replay_payload["mismatches"], [])
+        self.assertTrue(replay_payload["context_sources_present"])
+
+    def test_replay_mismatch_is_detected(self) -> None:
+        run = self.run_cli(["run", "--mode", "micro"])
+        run_payload = self.parse_stdout_json(run)
+
+        bundle = self.replay_dir / run_payload["run_id"]
+        decisions_path = bundle / "decisions.json"
+        decisions_payload = json.loads(decisions_path.read_text(encoding="utf-8"))
+        if decisions_payload.get("decisions"):
+            decisions_payload["decisions"][0]["route"] = "deferred"
+            decisions_path.write_text(json.dumps(decisions_payload, indent=2) + "\n", encoding="utf-8")
+
+        replay = self.run_cli(["replay", "--run-id", run_payload["run_id"]])
+        self.assertNotEqual(replay.returncode, 0)
+        replay_payload = self.parse_stdout_json(replay)
+        self.assertEqual(replay_payload["status"], "error")
+        self.assertEqual(replay_payload["error_code"], "ROUTE_MISMATCH_DETECTED")
+        self.assertGreaterEqual(len(replay_payload["mismatches"]), 1)
 
     def test_research_mode_is_disabled(self) -> None:
         completed = self.run_cli(["run", "--mode", "research_deep"])
@@ -187,53 +244,15 @@ class CliIntegrationTests(unittest.TestCase):
         self.assertNotEqual(completed.returncode, 0)
         self.assertIn("the following arguments are required: command", completed.stderr)
 
-    def test_workspace_wrappers_execute(self) -> None:
-        env = dict(**os.environ, INTENTION_ENGINE_CONFIG=str(self.config_path))
+    def test_validate_rejects_deprecated_fields(self) -> None:
+        payload = json.loads(self.config_path.read_text(encoding="utf-8"))
+        payload["intake"] = {"default_saga_id": "S02"}
+        self.config_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
-        micro_wrapper = MODULE_ROOT / "ops" / "ie_micro.sh"
-        status_wrapper = MODULE_ROOT / "ops" / "ie_status.sh"
-
-        micro_run = subprocess.run(
-            ["bash", str(micro_wrapper), "--dry-run"],
-            capture_output=True,
-            text=True,
-            check=False,
-            env=env,
-        )
-        self.assertEqual(micro_run.returncode, 0, msg=micro_run.stderr)
-
-        status_run = subprocess.run(
-            ["bash", str(status_wrapper)],
-            capture_output=True,
-            text=True,
-            check=False,
-            env=env,
-        )
-        self.assertEqual(status_run.returncode, 0, msg=status_run.stderr)
-        payload = json.loads(status_run.stdout)
-        self.assertIn("budget", payload)
-
-    def test_module_entrypoint_executes(self) -> None:
-        env = dict(**os.environ)
-        src_path = str(MODULE_ROOT / "src")
-        env["PYTHONPATH"] = f"{src_path}:{env['PYTHONPATH']}" if env.get("PYTHONPATH") else src_path
-
-        cmd = [
-            sys.executable,
-            "-m",
-            "intention_engine_core.cli",
-            "--config",
-            str(self.config_path),
-            "run",
-            "--mode",
-            "micro",
-            "--dry-run",
-        ]
-        completed = subprocess.run(cmd, capture_output=True, text=True, check=False, env=env)
-        self.assertEqual(completed.returncode, 0, msg=completed.stderr)
-
-        payload = json.loads(completed.stdout)
-        self.assertEqual(payload["status"], "dry_run")
+        completed = self.run_cli(["validate", "--json"])
+        self.assertNotEqual(completed.returncode, 0)
+        validate_payload = self.parse_stdout_json(completed)
+        self.assertIn("intake is no longer supported in this runtime contract", validate_payload["errors"])
 
 
 if __name__ == "__main__":

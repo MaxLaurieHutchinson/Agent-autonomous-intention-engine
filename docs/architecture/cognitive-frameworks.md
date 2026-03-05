@@ -16,7 +16,7 @@ This document separates what is implemented now from what is roadmap.
 - Candidate collection from configured sources (`reddit`, `hackernews`, `github`, `fixture`).
 
 ### Orient
-- Keyword extraction from `INTENT` + `PHILOSOPHY` text.
+- Weighted keyword extraction from configured `context_sources` (for example `INTENT`, `PHILOSOPHY`, and `memory/knowledge/*`).
 - Candidate scoring using relevance, AI signal, engagement, urgency decay, effort penalties, and risk.
 
 ### Decide
