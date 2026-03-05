@@ -61,6 +61,17 @@ Current state:
 - no dedicated duck-loop module
 - no additional routing stage for multi-perspective challenge
 
+## Specialist Repertoire Access (Implemented, Manual)
+
+V3 includes deterministic access to a full specialist prompt repertoire through:
+- pinned submodule: `external/agency-agents`
+- indexed roster: `docs/reference/sub-agent-roster.md`
+- usage model: manual specialist selection only
+
+Important boundary in this phase:
+- no runtime auto-spawn of specialists
+- no hidden orchestration behavior changes in the core run loop
+
 ## Why Keep This Separation
 
 Mixing planned frameworks with as-built behavior causes operator confusion and weakens observability.

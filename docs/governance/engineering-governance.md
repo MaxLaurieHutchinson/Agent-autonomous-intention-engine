@@ -27,6 +27,7 @@ Minimum evidence:
 - No legacy command shims.
 - No wrapper contract in this phase.
 - Human-activity gating belongs to heartbeat/orchestrator policy, not runtime internals.
+- Specialist repertoire invocation is explicit/manual in this phase; no runtime auto-spawn behavior.
 
 ## 4. Experiment Lifecycle Rules
 

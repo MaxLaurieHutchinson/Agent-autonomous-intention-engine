@@ -70,6 +70,19 @@ Discovery defaults are zero-secrets in this phase:
 Read the full handbook at [docs/INDEX.md](docs/INDEX.md).
 Governance contract: [docs/governance/engineering-governance.md](docs/governance/engineering-governance.md).
 
+## Specialist Repertoire (V3, Manual Catalog)
+
+V3 includes deterministic access to a full specialist prompt repertoire via pinned submodule:
+- `external/agency-agents`
+
+Manual selection resources:
+- [docs/reference/sub-agent-roster.md](docs/reference/sub-agent-roster.md)
+- [docs/operations/sub-agent-catalog-usage.md](docs/operations/sub-agent-catalog-usage.md)
+
+Attribution:
+- fork source: `https://github.com/MaxLaurieHutchinson/agency-agents`
+- upstream foundation: `https://github.com/msitarzewski/agency-agents`
+
 ## Fresh Clone Setup
 
 1. Bootstrap workspace state:

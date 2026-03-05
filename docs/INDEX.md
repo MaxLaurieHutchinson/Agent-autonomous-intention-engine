@@ -14,6 +14,7 @@ If you want to operate the engine day-to-day:
 - [Runbook](operations/runbook.md)
 - [OpenClaw Integration](operations/openclaw-integration.md)
 - [Cron vs Heartbeat](operations/cron-vs-heartbeat.md)
+- [Sub-Agent Catalog Usage (Manual)](operations/sub-agent-catalog-usage.md)
 - [Source Onboarding](operations/source-onboarding.md)
 - [FAQ](reference/faq.md)
 
@@ -27,9 +28,11 @@ If you want to tune behavior:
 - [Runtime Config Reference](config/runtime-config-reference.md)
 - [Proposals and Metrics](runtime/proposals-and-metrics.md)
 - [State and Artifacts](runtime/state-and-artifacts.md)
+- [Sub-Agent Roster](reference/sub-agent-roster.md)
 
 If you want the roadmap:
 - [Framework Evolution (BDI + Rubber Duck)](roadmap/framework-evolution.md)
+- [V3 Idea Lab](roadmap/v3-idea-lab.md)
 
 If you want governance and operating rules:
 - [Engineering Governance (Normative)](governance/engineering-governance.md)
