@@ -4,7 +4,7 @@ This is the mandatory operating contract for coding, pull requests, experiments,
 
 ## 1. Branch and PR Policy
 
-- Branch naming must use `codex/<topic>` for agent-authored work.
+- Branch naming must use `agent-{AgentName}/` for agent-authored work (for example, `agent-ash/<topic>` or `agent-codex/<topic>`).
 - No direct pushes to `main` or `dev`.
 - Every change lands via PR.
 - PRs must be scoped and reviewable; avoid mixed concerns.
