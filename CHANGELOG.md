@@ -1,5 +1,15 @@
 # Changelog
 
+## v2.1.3 - 2026-03-05 (dev)
+- Added `ops/bootstrap-workspace.sh` to initialize required workspace state for fresh clones:
+  - creates configured intent/reflect files when missing
+  - creates proposal queue directories and runtime artifact directories
+  - seeds `memory/PHILOSOPHY.md` from fallback philosophy file when absent
+- Updated setup documentation to run bootstrap before validation:
+  - `README.md`
+  - `docs/operations/runbook.md`
+  - `docs/reference/faq.md`
+
 ## v2.1.2 - 2026-03-04 (dev)
 - Replaced the prior numbered docs pack as the primary contract with a new topic-based handbook under `docs/`.
 - Rewrote root `README.md` as a product and operations entrypoint.

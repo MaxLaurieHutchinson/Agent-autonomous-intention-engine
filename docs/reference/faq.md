@@ -53,3 +53,11 @@ Any of these can degrade health:
 ## Why can `validate` return warnings with `status: ok`?
 
 `validate` distinguishes hard config errors from operational readiness warnings (for example missing `memory/INTENT.md`).
+
+For fresh clones, run:
+
+```bash
+bash ops/bootstrap-workspace.sh
+```
+
+Then re-run `validate --json`.

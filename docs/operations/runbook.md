@@ -10,6 +10,14 @@ This runbook is for operating the current `dev` runtime safely.
 
 ## Baseline Validation
 
+Bootstrap workspace files and directories first:
+
+```bash
+bash ops/bootstrap-workspace.sh
+```
+
+Then run:
+
 ```bash
 PYTHONPATH=./src python3 -m intention_engine_core.cli validate --json
 python3 -m unittest discover -s tests -v
