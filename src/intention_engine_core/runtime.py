@@ -7,7 +7,6 @@ import argparse
 import contextlib
 import dataclasses
 import datetime as dt
-import fcntl
 import hashlib
 import json
 import math
@@ -21,6 +20,16 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - exercised by Windows CI
+    fcntl = None
+
+try:
+    import msvcrt
+except ImportError:  # pragma: no cover - exercised by Linux CI
+    msvcrt = None
 
 from .path_resolver import resolve_config_path, resolve_path_value
 
@@ -159,12 +168,27 @@ def atomic_write_json(path: Path, payload: Any) -> None:
 @contextlib.contextmanager
 def file_lock(path: Path):
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a+", encoding="utf-8") as handle:
-        fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+    with path.open("a+b") as handle:
+        if fcntl is not None:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+        elif msvcrt is not None:
+            handle.seek(0, os.SEEK_END)
+            if handle.tell() == 0:
+                handle.write(b"\0")
+                handle.flush()
+            handle.seek(0)
+            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+        else:  # pragma: no cover - supported Python platforms provide one API
+            raise RuntimeError("No supported file-locking API is available.")
+
         try:
             yield
         finally:
-            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            if fcntl is not None:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            elif msvcrt is not None:
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
 
 
 def write_jsonl(path: Path, payload: Dict[str, Any]) -> None:

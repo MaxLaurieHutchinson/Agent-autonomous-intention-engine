@@ -1,25 +1,44 @@
 # Intention Engine
 
-Intention Engine is a deterministic, file-first autonomous decision loop for discovering work, routing risk, and producing auditable outputs.
+[![CI](https://github.com/MaxLaurieHutchinson/Agent-autonomous-intention-engine/actions/workflows/ci.yml/badge.svg)](https://github.com/MaxLaurieHutchinson/Agent-autonomous-intention-engine/actions/workflows/ci.yml)
 
-It is designed for two realities at once:
+Intention Engine is a deterministic, file-first decision loop for discovering work, routing risk, and producing replayable outputs.
+
+## Evidence Boundary
+
+This repository is a working reference implementation, not a production service or a claim of unconstrained autonomy. It currently proves:
+
+- config-driven candidate scoring and risk routing
+- human gates for sensitive or externally consequential work
+- persisted inputs, scores, decisions, budget state, logs, and replay bundles
+- deterministic replay of route decisions from captured decision values and routing configuration
+- tested core behaviour on Linux and Windows
+
+It does not provide a hosted control plane, distributed execution, multi-user access control, or evidence of production adoption. The OpenClaw scheduling layer is an optional operator integration; the Python runtime remains independently executable.
+
+It is designed for two operating contexts:
 - operator-first use in an OpenClaw workspace
 - clean packaging and documentation for public reuse
+
+## Why Deterministic Routing
+
+The engine deliberately separates discovery from decision execution. External sources can change between runs. The current replay contract reruns routing against the captured score, relevance, autonomy class, and routing configuration; it does not refetch sources or recompute candidate scoring. This narrow contract makes the final route inspectable without claiming a broader replay capability than the code provides.
 
 ## Core Contract
 
 Canonical runtime entrypoint:
 
 ```bash
-PYTHONPATH=./src python3 -m intention_engine_core.cli --config config/runtime.json run --mode <micro|deep|research_deep> [--dry-run]
+python -m pip install -e .
+python -m intention_engine_core.cli --config config/runtime.json run --mode <micro|deep|research_deep> [--dry-run]
 ```
 
 Other commands:
 
 ```bash
-PYTHONPATH=./src python3 -m intention_engine_core.cli --config config/runtime.json status --json
-PYTHONPATH=./src python3 -m intention_engine_core.cli --config config/runtime.json validate --json
-PYTHONPATH=./src python3 -m intention_engine_core.cli --config config/runtime.json replay --run-id <run-id>
+python -m intention_engine_core.cli --config config/runtime.json status --json
+python -m intention_engine_core.cli --config config/runtime.json validate --json
+python -m intention_engine_core.cli --config config/runtime.json replay --run-id <run-id>
 ```
 
 Wrapper commands:
@@ -55,6 +74,18 @@ One run follows this sequence:
 - logs: `logs/engine.jsonl`
 - reflections: `memory/REFLECT.md`
 
+## Inspect One Run and Replay
+
+The repository includes an offline fixture configuration so the decision path can be reproduced without network discovery:
+
+```bash
+python -m intention_engine_core.cli --config config/audited-example.json validate --json
+python -m intention_engine_core.cli --config config/audited-example.json run --mode micro
+python -m intention_engine_core.cli --config config/audited-example.json replay --run-id <run-id>
+```
+
+Use the `run_id` from the second command. Then inspect `data/audited-example/runs/<run-id>/inputs.json`, `scores.json`, `decisions.json`, and `config-hash.txt`. The replay succeeds only when the recomputed routes match the captured decisions. See [docs/audited-run.md](docs/audited-run.md) for the decision walkthrough and limits of the evidence.
+
 ## Philosophy and Safety
 
 `philosophy/PHILOSOPHY.md` (or configured `memory/PHILOSOPHY.md`) is actively used in scoring through keyword extraction.
@@ -76,16 +107,18 @@ Read the full handbook at [docs/INDEX.md](docs/INDEX.md).
 
 ## Fresh Clone Setup
 
-1. Bootstrap workspace state:
+1. Install the package:
+   - `python -m pip install -e .`
+2. Bootstrap workspace state:
    - `bash ops/bootstrap-workspace.sh`
-2. Validate config and paths:
-   - `PYTHONPATH=./src python3 -m intention_engine_core.cli validate --json`
-3. Run a dry micro smoke:
+3. Validate config and paths:
+   - `python -m intention_engine_core.cli validate --json`
+4. Run a dry micro smoke:
    - `bash ops/ie_micro.sh --dry-run`
 
 ## Stability Status
 
-Implemented now:
+Implemented and tested now:
 - deterministic OODA-style run loop
 - risk-aware routing and guardrails
 - replayability and operational health surfaces

@@ -129,7 +129,9 @@ class CliIntegrationTests(unittest.TestCase):
     def run_cli(self, args):
         env = dict(**os.environ)
         src_path = str(MODULE_ROOT / "src")
-        env["PYTHONPATH"] = f"{src_path}:{env['PYTHONPATH']}" if env.get("PYTHONPATH") else src_path
+        env["PYTHONPATH"] = (
+            f"{src_path}{os.pathsep}{env['PYTHONPATH']}" if env.get("PYTHONPATH") else src_path
+        )
         cmd = [sys.executable, "-m", "intention_engine_core.cli", "--config", str(self.config_path)] + list(args)
         return subprocess.run(cmd, capture_output=True, text=True, check=False, env=env)
 
@@ -188,6 +190,9 @@ class CliIntegrationTests(unittest.TestCase):
         self.assertIn("the following arguments are required: command", completed.stderr)
 
     def test_workspace_wrappers_execute(self) -> None:
+        if os.name == "nt":
+            self.skipTest("POSIX shell wrappers are covered by Linux CI.")
+
         env = dict(**os.environ, INTENTION_ENGINE_CONFIG=str(self.config_path))
 
         micro_wrapper = MODULE_ROOT / "ops" / "ie_micro.sh"
@@ -216,7 +221,9 @@ class CliIntegrationTests(unittest.TestCase):
     def test_module_entrypoint_executes(self) -> None:
         env = dict(**os.environ)
         src_path = str(MODULE_ROOT / "src")
-        env["PYTHONPATH"] = f"{src_path}:{env['PYTHONPATH']}" if env.get("PYTHONPATH") else src_path
+        env["PYTHONPATH"] = (
+            f"{src_path}{os.pathsep}{env['PYTHONPATH']}" if env.get("PYTHONPATH") else src_path
+        )
 
         cmd = [
             sys.executable,

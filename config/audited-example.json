@@ -1,0 +1,87 @@
+{
+  "daily_budget_gbp": 2.0,
+  "reserve_budget_gbp": 0.2,
+  "mode_profiles": {
+    "micro": {
+      "enabled": true,
+      "max_items": 3,
+      "max_run_cost": 0.05,
+      "validation": "smoke",
+      "delegation": false,
+      "checkpointing": false
+    },
+    "deep": {
+      "enabled": false,
+      "max_items": 5,
+      "max_run_cost": 0.2,
+      "validation": "smoke",
+      "delegation": false,
+      "checkpointing": false
+    },
+    "research_deep": {
+      "enabled": false,
+      "max_items": 8,
+      "max_run_cost": 0.4,
+      "validation": "full",
+      "delegation": false,
+      "checkpointing": false
+    }
+  },
+  "paths": {
+    "intent_path": "fixtures/audited-example/INTENT.md",
+    "reflect_path": "data/audited-example/REFLECT.md",
+    "philosophy_path": "fixtures/audited-example/PHILOSOPHY.md",
+    "philosophy_fallback_path": "fixtures/audited-example/PHILOSOPHY.md",
+    "proposals_dir": "data/audited-example/proposals",
+    "briefings_dir": "data/audited-example/briefings",
+    "metrics_dir": "data/audited-example/metrics",
+    "budget_state_path": "data/audited-example/budget.json",
+    "lock_path": "data/audited-example/runtime.lock",
+    "logs_path": "data/audited-example/engine.jsonl",
+    "replay_dir": "data/audited-example/runs",
+    "cron_jobs_path": "data/audited-example/cron-jobs.json"
+  },
+  "idle_threshold_minutes": 5,
+  "sources": [
+    {
+      "type": "fixture",
+      "name": "Audited example",
+      "items": [
+        {
+          "title": "Review deployment token rotation procedure",
+          "url": "https://example.invalid/token-review",
+          "engagement": 10,
+          "created_at": "2026-03-01T09:00:00Z"
+        },
+        {
+          "title": "Summarise deterministic replay test coverage",
+          "url": "https://example.invalid/replay-tests",
+          "engagement": 8,
+          "created_at": "2026-03-01T09:05:00Z"
+        },
+        {
+          "title": "Evaluate OAuth migration options",
+          "url": "https://example.invalid/oauth-migration",
+          "engagement": 6,
+          "created_at": "2026-03-01T09:10:00Z"
+        }
+      ]
+    }
+  ],
+  "routing": {
+    "auto_safe_threshold": 0.75,
+    "policy_guarded_threshold": 0.7,
+    "defer_threshold": 0.45,
+    "min_relevance_threshold": 0.08,
+    "allow_policy_guarded_auto": false,
+    "guarded_keywords": ["migration", "oauth", "security", "auth"],
+    "always_human_gate_keywords": ["password", "secret", "token", "production", "deploy", "publish"]
+  },
+  "intake": {
+    "default_saga_id": "S02",
+    "default_chapter_id": "C06",
+    "default_intent_status": "NEXT",
+    "auto_insert_intentions": false
+  },
+  "external_action_keywords": ["send", "post", "email", "publish", "deploy", "release"]
+}

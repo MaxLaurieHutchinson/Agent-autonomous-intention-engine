@@ -1,5 +1,6 @@
 import unittest
 from pathlib import Path
+import tempfile
 
 import sys
 
@@ -17,8 +18,9 @@ class PathResolutionTests(unittest.TestCase):
 
     def test_absolute_path_preserved(self) -> None:
         workspace_root = Path("/tmp/workspace-root")
-        resolved = resolve_path_value("/var/tmp/custom.json", workspace_root)
-        self.assertEqual(resolved, Path("/var/tmp/custom.json"))
+        absolute_path = Path(tempfile.gettempdir()).resolve() / "intention-engine-custom.json"
+        resolved = resolve_path_value(str(absolute_path), workspace_root)
+        self.assertEqual(resolved, absolute_path)
 
     def test_tilde_path_expands_home(self) -> None:
         workspace_root = Path("/tmp/workspace-root")
