@@ -1,6 +1,13 @@
 # Changelog
 
-## v2.1.4 - 2026-03-05 (dev)
+## Unreleased
+
+* Refreshed the README with a compact overview, setup path, routing diagram and explicit replay and safety boundaries.
+* Aligned package metadata with the existing v2.1.4 release and added author and project links. No new release is created by this change.
+* Replaced personal starter philosophy notes with a neutral example. This can change scores for new workspaces or those using the fallback file; bootstrap does not overwrite an existing workspace philosophy.
+* Ignored local virtual environments and package build artifacts.
+
+## v2.1.4 - 2026-03-05
 - Hardened CI for release-readiness:
   - added `ops/bootstrap-workspace.sh` execution in CI to initialize expected runtime files and directories
   - added editable package install smoke (`pip install -e .` + import check)
