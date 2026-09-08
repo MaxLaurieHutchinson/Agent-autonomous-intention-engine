@@ -4,11 +4,20 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "intention-engine"
-version = "2.1.0"
-description = "Single deployable Intention Engine with deterministic runtime, safe guardrails, and operational wrappers."
+version = "2.1.4"
+description = "Discover candidate work, route proposals by configured risk rules, and inspect captured decisions."
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
+authors = [{ name = "Max Hutchinson" }]
+keywords = ["agents", "decision-routing", "openclaw", "replay"]
+
+[project.urls]
+Homepage = "https://github.com/MaxLaurieHutchinson/Agent-autonomous-intention-engine"
+Documentation = "https://github.com/MaxLaurieHutchinson/Agent-autonomous-intention-engine/blob/main/docs/INDEX.md"
+Repository = "https://github.com/MaxLaurieHutchinson/Agent-autonomous-intention-engine"
+Issues = "https://github.com/MaxLaurieHutchinson/Agent-autonomous-intention-engine/issues"
+Changelog = "https://github.com/MaxLaurieHutchinson/Agent-autonomous-intention-engine/blob/main/CHANGELOG.md"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
